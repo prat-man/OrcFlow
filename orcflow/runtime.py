@@ -11,7 +11,7 @@ from orcflow.worker import Worker
 class Runtime:
     """Own the process pool and execution state for one flow run."""
 
-    def __init__(self, workers=None, concurrency=None, verbose=False):
+    def __init__(self, workers=None, concurrency=None, initializer=None, initargs=(), verbose=False):
         self.id = uuid.uuid4().hex[:8]
         self.verbose = verbose
         self.concurrency = concurrency or {}
@@ -23,9 +23,11 @@ class Runtime:
         self.root = None
         self.manager = Manager()
         self.workers = workers
-        self.pool = ProcessPoolExecutor(max_workers=workers)
         self.nodes = {}
         self.scheduler = Scheduler(self)
+
+        # The initializer runs once when each process-pool worker starts.
+        self.pool = ProcessPoolExecutor(max_workers=workers, initializer=initializer, initargs=initargs)
 
         # Every process receives its own copy of this lightweight worker interface.
         self.worker = Worker(self.id, self.verbose, self.scheduler.requests)

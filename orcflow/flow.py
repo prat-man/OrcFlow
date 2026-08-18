@@ -8,19 +8,24 @@ from orcflow.node import Node, NodeType
 class Flow:
     """Wrap a function as an OrcFlow flow."""
 
-    def __init__(self, fn, name=None, workers=None, concurrency=None, verbose=False):
+    def __init__(self, fn, name=None, workers=None, concurrency=None, initializer=None, initargs=(), verbose=False):
         self.fn = fn
         self.name = name or fn.__name__
         self.workers = workers
         self.concurrency = concurrency or {}
+        self.initializer = initializer
+        self.initargs = initargs
         self.verbose = verbose
 
-    def with_options(self, *, name=None, workers=None, concurrency=None, verbose=None):
+    def with_options(self, *, name=None, workers=None, concurrency=None, initializer=None, initargs=None, verbose=None):
+        """Return a copy of this flow with updated options."""
         return Flow(
             self.fn,
             name=self.name if name is None else name,
             workers=self.workers if workers is None else workers,
             concurrency=self.concurrency if concurrency is None else concurrency,
+            initializer=self.initializer if initializer is None else initializer,
+            initargs=self.initargs if initargs is None else initargs,
             verbose=self.verbose if verbose is None else verbose,
         )
 
@@ -36,7 +41,13 @@ class Flow:
 
     def __call__(self, *args, **kwargs):
         """Start a new run of the flow."""
-        runtime = Runtime(workers=self.workers, concurrency=self.concurrency, verbose=self.verbose)
+        runtime = Runtime(
+            workers=self.workers,
+            concurrency=self.concurrency,
+            initializer=self.initializer,
+            initargs=self.initargs,
+            verbose=self.verbose,
+        )
         name = self.get_name(*args, **kwargs)
         runtime.root = Node(name, NodeType.FLOW)
 
@@ -44,10 +55,18 @@ class Flow:
         return Run(result=result, runtime=runtime)
 
 
-def flow(fn=None, *, name=None, workers=None, concurrency=None, verbose=False):
+def flow(fn=None, *, name=None, workers=None, concurrency=None, initializer=None, initargs=(), verbose=False):
     """Decorate a function as a flow."""
     def decorate(fn):
-        return Flow(fn, name=name, workers=workers, concurrency=concurrency, verbose=verbose)
+        return Flow(
+            fn,
+            name=name,
+            workers=workers,
+            concurrency=concurrency,
+            initializer=initializer,
+            initargs=initargs,
+            verbose=verbose,
+        )
 
     if fn is None:
         return decorate
