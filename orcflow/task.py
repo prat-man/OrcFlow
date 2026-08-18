@@ -1,6 +1,8 @@
 from inspect import signature
 from types import FunctionType
 
+from orcflow.result import CompositeResult
+
 
 class Task:
     """Wrap a reusable OrcFlow task function."""
@@ -44,6 +46,11 @@ class BoundTask:
         name = self.task.get_name(*args, **kwargs)
 
         return self.runtime.run(self.task.fn, *args, parent=self.parent, name=name, tag=self.task.tag, **kwargs)
+
+    def map(self, arguments):
+        """Submit this task once for each argument mapping."""
+        results = [self.submit(**values) for values in arguments]
+        return CompositeResult(results)
 
     def __call__(self, *args, **kwargs):
         raise TypeError(

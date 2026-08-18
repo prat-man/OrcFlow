@@ -26,6 +26,34 @@ class Result:
         return self.future.exception()
 
 
+class CompositeResult:
+    """Represent a group of results as one result."""
+
+    def __init__(self, results):
+        self._results = results
+
+    def results(self):
+        """Wait for and return all results in submission order."""
+        return [result.result() for result in self._results]
+
+    def done(self):
+        """Return whether every result is ready."""
+        return all(result.done() for result in self._results)
+
+    def cancel(self):
+        """Try to cancel all underlying work."""
+        cancelled = [result.cancel() for result in self._results]
+        return all(cancelled)
+
+    def exceptions(self):
+        """Return all exceptions raised by the group."""
+        return [
+            exception
+            for result in self._results
+            if (exception := result.exception()) is not None
+        ]
+
+
 class WorkerFuture:
     """Wait for a nested task result sent back to this worker."""
 
