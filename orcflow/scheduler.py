@@ -104,6 +104,12 @@ class Scheduler:
             self.futures.pop(node_id, None)
             node = self.runtime.nodes[node_id]
 
+            # A pool process becomes idle again when its current node completes.
+            for pid, current_node_id in self.runtime.processes.items():
+                if current_node_id == node_id:
+                    self.runtime.processes[pid] = None
+                    break
+
             if future.cancelled():
                 node.status = Status.CANCELLED
 
@@ -179,19 +185,24 @@ class Scheduler:
                 return
 
             if kind is Status.RUNNING:
-                _, node_id = message
+                _, node_id, pid = message
+
                 with self.lock:
                     node = self.runtime.nodes[node_id]
+                    self.runtime.processes.setdefault(pid, None)
+
                     if node.status is Status.QUEUED:
                         node.status = Status.RUNNING
+                        self.runtime.processes[pid] = node_id
+
                 continue
 
             if kind == Request.SUBMIT:
-                _, node_id, reference, args, kwargs, parent_id, name, tag, reply = message
+                _, reference, args, kwargs, parent_id, name, tag, reply = message
 
                 # The real tree lives in the parent process.
                 parent = self.runtime.nodes[parent_id]
-                node = parent.add(name, NodeType.TASK, id=node_id)
+                node = parent.add(name, NodeType.TASK)
 
                 self._queue(reference, args, kwargs, node, tag, reply=reply)
 

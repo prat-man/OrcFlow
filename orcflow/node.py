@@ -12,16 +12,16 @@ class NodeType(Enum):
 class Node:
     """Represent one flow or task execution in the run tree."""
 
-    def __init__(self, name, type, id=None):
-        self.id = id or uuid.uuid4().hex
+    def __init__(self, name, type):
+        self.id = uuid.uuid4().hex
         self.name = name
         self.type = type
         self.status = None
         self.children = []
 
-    def add(self, name, type, id=None):
+    def add(self, name, type):
         """Add and return a child node."""
-        child = Node(name, type, id=id)
+        child = Node(name, type)
         self.children.append(child)
         return child
 

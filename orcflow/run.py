@@ -1,5 +1,5 @@
+from psutil import Process
 import time
-from copy import deepcopy
 
 from orcflow.result import Result
 
@@ -29,9 +29,30 @@ class Run(Result):
         self._runtime.shutdown()
 
     def tree(self):
-        """Return a detached snapshot of the current execution tree."""
-        with self._runtime.scheduler.lock:
-            return deepcopy(self._runtime.root)
+        """Return a snapshot of the current execution tree."""
+        return self._runtime.get_root()
+
+    def workers(self):
+        """Return a snapshot of pool worker status."""
+        workers = self._runtime.get_workers()
+        processes = {worker.pid: Process(worker.pid) for worker in workers}
+
+        # Prime all CPU measurements.
+        for process in processes.values():
+            process.cpu_percent(interval=None)
+
+        # Use one shared sampling interval for all workers.
+        time.sleep(0.1)
+
+        for worker in workers:
+            process = processes[worker.pid]
+
+            with process.oneshot():
+                worker.cpu = process.cpu_percent(interval=None)
+                worker.memory = process.memory_info().rss
+                worker.threads = process.num_threads()
+
+        return workers
 
     def capacity(self):
         """Return the current worker and tag capacity."""

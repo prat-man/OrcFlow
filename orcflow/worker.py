@@ -1,6 +1,6 @@
 import importlib
+import os
 import sys
-import uuid
 from multiprocessing import Pipe
 
 from orcflow import utils
@@ -19,17 +19,16 @@ class Worker:
 
     def run(self, fn, *args, parent=None, name=None, tag=None, **kwargs):
         """Ask the parent scheduler to run a nested task."""
-        node_id = uuid.uuid4().hex
         reference = fn.__module__, fn.__qualname__
 
         # Each nested task gets a private one-way reply pipe.
         receiver, sender = Pipe(duplex=False)
-        self.requests.put((Request.SUBMIT, node_id, reference, args, kwargs, parent, name, tag, sender))
+        self.requests.put((Request.SUBMIT, reference, args, kwargs, parent, name, tag, sender))
         return Result(WorkerFuture(receiver, sender))
 
     def set_running(self, node_id):
         """Tell the scheduler that this node has started running."""
-        self.requests.put((Status.RUNNING, node_id))
+        self.requests.put((Status.RUNNING, node_id, os.getpid()))
 
 
 def resolve(reference):

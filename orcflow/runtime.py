@@ -1,6 +1,9 @@
 import uuid
+from copy import deepcopy
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Manager
+
+from bunch_py3 import Bunch
 
 from orcflow import utils
 from orcflow.scheduler import Scheduler
@@ -24,6 +27,7 @@ class Runtime:
         self.manager = Manager()
         self.workers = workers
         self.nodes = {}
+        self.processes = {}
         self.scheduler = Scheduler(self)
 
         # The initializer runs once when each process-pool worker starts.
@@ -49,3 +53,33 @@ class Runtime:
 
         if self.verbose:
             utils.log(Status.SHUTDOWN, None, self)
+
+    def get_workers(self):
+        """Return a snapshot of pool workers and their current nodes."""
+        with self.scheduler.lock:
+            workers = []
+
+            for pid, node_id in self.processes.items():
+                worker = Bunch()
+                workers.append(worker)
+
+                worker.pid = pid
+
+                if node_id is not None:
+                    node = self.nodes[node_id]
+
+                    worker.node = Bunch()
+                    worker.node.id = node.id
+                    worker.node.name = node.name
+                    worker.node.type = node.type
+                    worker.node.status = node.status
+
+                else:
+                    worker.node = None
+
+            return workers
+
+    def get_root(self):
+        """Return a snapshot of the execution root node."""
+        with self.scheduler.lock:
+            return deepcopy(self.root)

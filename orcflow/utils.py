@@ -30,6 +30,7 @@ def log(status, name=None, runtime=None):
     if runtime is not None:
         message += f" runtime={runtime.id}"
 
-    message += f" pid={os.getpid()}"
+    if status is Status.RUNNING:
+        message += f" pid={os.getpid()}"
 
     print(message)
