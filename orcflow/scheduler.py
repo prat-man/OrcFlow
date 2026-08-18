@@ -180,7 +180,10 @@ class Scheduler:
 
             if kind is Status.RUNNING:
                 _, node_id = message
-                self.runtime.nodes[node_id].status = Status.RUNNING
+                with self.lock:
+                    node = self.runtime.nodes[node_id]
+                    if node.status is Status.QUEUED:
+                        node.status = Status.RUNNING
                 continue
 
             if kind == Request.SUBMIT:
@@ -194,56 +197,56 @@ class Scheduler:
 
     def capacity(self):
         """Return the current worker and tag capacity."""
-
-        # Running nodes correspond to occupied process-pool workers.
-        workers_used = sum(
-            node.status is Status.RUNNING
-            for node in self.runtime.nodes.values()
-        )
-
-        tags = Bunch()
-
-        # Tag capacity is tracked separately from physical worker capacity.
-        for tag, limit in self.runtime.concurrency.items():
-            used = self.running.get(tag, 0)
-
-            tags[tag] = Bunch(
-                limit=limit,
-                used=used,
-                free=limit - used,
+        with self.lock:
+            # Running nodes correspond to occupied process-pool workers.
+            workers_used = sum(
+                node.status is Status.RUNNING
+                for node in self.runtime.nodes.values()
             )
 
-        return Bunch(
-            workers=Bunch(
-                total=self.runtime.workers,
-                used=workers_used,
-                free=self.runtime.workers - workers_used,
-            ),
-            tags=tags,
-        )
+            tags = Bunch()
+
+            # Tag capacity is tracked separately from physical worker capacity.
+            for tag, limit in self.runtime.concurrency.items():
+                used = self.running.get(tag, 0)
+
+                tags[tag] = Bunch(
+                    limit=limit,
+                    used=used,
+                    free=limit - used,
+                )
+
+            return Bunch(
+                workers=Bunch(
+                    total=self.runtime.workers,
+                    used=workers_used,
+                    free=self.runtime.workers - workers_used,
+                ),
+                tags=tags,
+            )
 
     def counts(self):
         """Return the current execution counts by status."""
+        with self.lock:
+            # Count execution nodes by their current status.
+            counts = Bunch(
+                queued=0,
+                running=0,
+                finished=0,
+                failed=0,
+                cancelled=0,
+            )
 
-        # Count execution nodes by their current status.
-        counts = Bunch(
-            queued=0,
-            running=0,
-            finished=0,
-            failed=0,
-            cancelled=0,
-        )
+            for node in self.runtime.nodes.values():
+                if node.status is Status.QUEUED:
+                    counts.queued += 1
+                elif node.status is Status.RUNNING:
+                    counts.running += 1
+                elif node.status is Status.FINISHED:
+                    counts.finished += 1
+                elif node.status is Status.FAILED:
+                    counts.failed += 1
+                elif node.status is Status.CANCELLED:
+                    counts.cancelled += 1
 
-        for node in self.runtime.nodes.values():
-            if node.status is Status.QUEUED:
-                counts.queued += 1
-            elif node.status is Status.RUNNING:
-                counts.running += 1
-            elif node.status is Status.FINISHED:
-                counts.finished += 1
-            elif node.status is Status.FAILED:
-                counts.failed += 1
-            elif node.status is Status.CANCELLED:
-                counts.cancelled += 1
-
-        return counts
+            return counts

@@ -1,11 +1,12 @@
 from orcflow.flow import Flow, flow
-from orcflow.result import Result
+from orcflow.result import CompositeResult, Result
 from orcflow.run import Run
 from orcflow.types import Status
 from orcflow.task import Task, task
 
 
 __all__ = [
+    "CompositeResult",
     "Flow",
     "Result",
     "Run",
