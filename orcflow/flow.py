@@ -15,6 +15,15 @@ class Flow:
         self.concurrency = concurrency or {}
         self.verbose = verbose
 
+    def with_options(self, *, name=None, workers=None, concurrency=None, verbose=None):
+        return Flow(
+            self.fn,
+            name=self.name if name is None else name,
+            workers=self.workers if workers is None else workers,
+            concurrency=self.concurrency if concurrency is None else concurrency,
+            verbose=self.verbose if verbose is None else verbose,
+        )
+
     def get_name(self, *args, **kwargs):
         """Resolve the display name for this flow call."""
         if callable(self.name):

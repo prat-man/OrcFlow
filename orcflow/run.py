@@ -1,6 +1,5 @@
 from copy import deepcopy
 
-from orcflow import utils
 from orcflow.result import Result
 
 
@@ -24,3 +23,7 @@ class Run(Result):
     def tree(self):
         """Return a detached snapshot of the current execution tree."""
         return deepcopy(self._runtime.root)
+
+    def capacity(self):
+        """Return the current worker and tag capacity."""
+        return self._runtime.scheduler.capacity()

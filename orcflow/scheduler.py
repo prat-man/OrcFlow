@@ -2,6 +2,8 @@ import threading
 from concurrent.futures import Future
 from functools import partial
 
+from bunch_py3 import Bunch
+
 from orcflow import utils
 from orcflow.node import NodeType
 from orcflow.types import Request, Status
@@ -189,3 +191,31 @@ class Scheduler:
                 node = parent.add(name, NodeType.TASK, id=node_id)
 
                 self._queue(reference, args, kwargs, node, tag, reply=reply)
+
+    def capacity(self):
+        # Running nodes correspond to occupied process-pool workers.
+        workers_used = sum(
+            node.status is Status.RUNNING
+            for node in self.runtime.nodes.values()
+        )
+
+        tags = Bunch()
+
+        # Tag capacity is tracked separately from physical worker capacity.
+        for tag, limit in self.runtime.concurrency.items():
+            used = self.running.get(tag, 0)
+
+            tags[tag] = Bunch(
+                limit=limit,
+                used=used,
+                free=limit - used,
+            )
+
+        return Bunch(
+            workers=Bunch(
+                total=self.runtime.workers,
+                used=workers_used,
+                free=self.runtime.workers - workers_used,
+            ),
+            tags=tags,
+        )

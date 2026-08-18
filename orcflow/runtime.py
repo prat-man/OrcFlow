@@ -22,6 +22,7 @@ class Runtime:
 
         self.root = None
         self.manager = Manager()
+        self.workers = workers
         self.pool = ProcessPoolExecutor(max_workers=workers)
         self.nodes = {}
         self.scheduler = Scheduler(self)
