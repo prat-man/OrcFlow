@@ -1,0 +1,81 @@
+from inspect import signature
+from types import FunctionType
+
+
+class Task:
+    """Wrap a reusable OrcFlow task function."""
+
+    def __init__(self, fn, name=None, tag=None):
+        self.fn = fn
+        self.name = name or fn.__name__
+        self.tag = tag
+
+    def get_name(self, *args, **kwargs):
+        """Resolve the display name for this task call."""
+        if callable(self.name):
+            return self.name(*args, **kwargs)
+
+        parameters = signature(self.fn).bind(*args, **kwargs)
+        parameters.apply_defaults()
+
+        return self.name.format(**parameters.arguments)
+
+    def bind(self, runtime, parent):
+        """Bind this task to a specific runtime and parent node."""
+        return BoundTask(self, runtime, parent)
+
+    def __call__(self, *args, **kwargs):
+        raise TypeError(
+            f"Task {self.name!r} cannot be called directly. "
+            f"Use {self.name}.submit(...)."
+        )
+
+
+class BoundTask:
+    """A task bound to the runtime of the function currently executing."""
+
+    def __init__(self, task, runtime, parent):
+        self.task = task
+        self.runtime = runtime
+        self.parent = parent
+
+    def submit(self, *args, **kwargs):
+        """Submit this task under its bound parent node."""
+        name = self.task.get_name(*args, **kwargs)
+
+        return self.runtime.run(self.task.fn, *args, parent=self.parent, name=name, tag=self.task.tag, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        raise TypeError(
+            f"Task {self.task.name!r} cannot be called directly. "
+            f"Use {self.task.name}.submit(...)."
+        )
+
+
+def task(fn=None, *, name=None, tag=None):
+    """Decorate a function as a task."""
+    def decorate(fn):
+        return Task(fn, name=name, tag=tag)
+
+    if fn is None:
+        return decorate
+
+    return decorate(fn)
+
+
+def bind_tasks(fn, runtime, parent):
+    """Bind task globals to the runtime handling this execution."""
+    globals_ = fn.__globals__.copy()
+
+    # Replace task definitions with runtime-bound task objects for this call only.
+    for name, value in globals_.items():
+        if isinstance(value, Task):
+            globals_[name] = value.bind(runtime, parent)
+
+    return FunctionType(
+        fn.__code__,
+        globals_,
+        fn.__name__,
+        fn.__defaults__,
+        fn.__closure__,
+    )
