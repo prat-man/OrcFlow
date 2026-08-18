@@ -193,6 +193,8 @@ class Scheduler:
                 self._queue(reference, args, kwargs, node, tag, reply=reply)
 
     def capacity(self):
+        """Return the current worker and tag capacity."""
+
         # Running nodes correspond to occupied process-pool workers.
         workers_used = sum(
             node.status is Status.RUNNING
@@ -219,3 +221,29 @@ class Scheduler:
             ),
             tags=tags,
         )
+
+    def counts(self):
+        """Return the current execution counts by status."""
+
+        # Count execution nodes by their current status.
+        counts = Bunch(
+            queued=0,
+            running=0,
+            finished=0,
+            failed=0,
+            cancelled=0,
+        )
+
+        for node in self.runtime.nodes.values():
+            if node.status is Status.QUEUED:
+                counts.queued += 1
+            elif node.status is Status.RUNNING:
+                counts.running += 1
+            elif node.status is Status.FINISHED:
+                counts.finished += 1
+            elif node.status is Status.FAILED:
+                counts.failed += 1
+            elif node.status is Status.CANCELLED:
+                counts.cancelled += 1
+
+        return counts
