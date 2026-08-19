@@ -8,7 +8,7 @@ from orcflow import utils
 from orcflow.node import NodeType
 from orcflow.types import Request, Status
 from orcflow.result import Result
-from orcflow.worker import execute
+from orcflow.worker import Client, Worker, execute
 
 
 class Scheduler:
@@ -20,7 +20,7 @@ class Scheduler:
         self.futures = {}
         self.pending = []
         self.running = {}
-        self.worker = None
+        self.client = Client(runtime.id, runtime.verbose, self.requests)
         self.lock = threading.RLock()
 
         # Worker requests are handled without blocking the main thread.
@@ -78,7 +78,7 @@ class Scheduler:
             self.running[tag] = self.running.get(tag, 0) + 1
 
         try:
-            future = self.runtime.pool.submit(execute, reference, args, kwargs, self.worker, node.id, node.name)
+            future = self.runtime.pool.submit(execute, reference, args, kwargs, self.client, node.id, node.name)
         except Exception as exc:
             node.status = Status.FAILED
             self._release(tag)
@@ -104,10 +104,10 @@ class Scheduler:
             self.futures.pop(node_id, None)
             node = self.runtime.nodes[node_id]
 
-            # A pool process becomes idle again when its current node completes.
-            for pid, current_node_id in self.runtime.processes.items():
-                if current_node_id == node_id:
-                    self.runtime.processes[pid] = None
+            # A pool worker becomes idle again when its current node completes.
+            for worker in self.runtime.workers.values():
+                if worker.node is node:
+                    worker.node = None
                     break
 
             if future.cancelled():
@@ -189,11 +189,11 @@ class Scheduler:
 
                 with self.lock:
                     node = self.runtime.nodes[node_id]
-                    self.runtime.processes.setdefault(pid, None)
+                    worker = self.runtime.workers.setdefault(pid, Worker(pid))
 
                     if node.status is Status.QUEUED:
                         node.status = Status.RUNNING
-                        self.runtime.processes[pid] = node_id
+                        worker.node = node
 
                 continue
 
@@ -205,59 +205,3 @@ class Scheduler:
                 node = parent.add(name, NodeType.TASK)
 
                 self._queue(reference, args, kwargs, node, tag, reply=reply)
-
-    def capacity(self):
-        """Return the current worker and tag capacity."""
-        with self.lock:
-            # Running nodes correspond to occupied process-pool workers.
-            workers_used = sum(
-                node.status is Status.RUNNING
-                for node in self.runtime.nodes.values()
-            )
-
-            tags = Bunch()
-
-            # Tag capacity is tracked separately from physical worker capacity.
-            for tag, limit in self.runtime.concurrency.items():
-                used = self.running.get(tag, 0)
-
-                tags[tag] = Bunch(
-                    limit=limit,
-                    used=used,
-                    free=limit - used,
-                )
-
-            return Bunch(
-                workers=Bunch(
-                    total=self.runtime.workers,
-                    used=workers_used,
-                    free=self.runtime.workers - workers_used,
-                ),
-                tags=tags,
-            )
-
-    def counts(self):
-        """Return the current execution counts by status."""
-        with self.lock:
-            # Count execution nodes by their current status.
-            counts = Bunch(
-                queued=0,
-                running=0,
-                finished=0,
-                failed=0,
-                cancelled=0,
-            )
-
-            for node in self.runtime.nodes.values():
-                if node.status is Status.QUEUED:
-                    counts.queued += 1
-                elif node.status is Status.RUNNING:
-                    counts.running += 1
-                elif node.status is Status.FINISHED:
-                    counts.finished += 1
-                elif node.status is Status.FAILED:
-                    counts.failed += 1
-                elif node.status is Status.CANCELLED:
-                    counts.cancelled += 1
-
-            return counts
