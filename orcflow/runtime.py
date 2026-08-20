@@ -1,9 +1,9 @@
 import uuid
 from copy import deepcopy
-from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Manager
 
 from bunch_py3 import Bunch
+from pebble import ProcessPool
 
 from orcflow import utils
 from orcflow.scheduler import Scheduler
@@ -30,7 +30,7 @@ class Runtime:
         self.scheduler = Scheduler(self)
 
         # The initializer runs once when each process-pool worker starts.
-        self.pool = ProcessPoolExecutor(max_workers=n_workers, initializer=initializer, initargs=initargs)
+        self.pool = ProcessPool(max_workers=n_workers, initializer=initializer, initargs=initargs)
 
         self.scheduler.start()
 
@@ -43,7 +43,8 @@ class Runtime:
 
     def shutdown(self):
         """Finish outstanding work and release runtime resources."""
-        self.pool.shutdown()
+        self.pool.close()
+        self.pool.join()
         self.scheduler.stop()
         self.manager.shutdown()
 

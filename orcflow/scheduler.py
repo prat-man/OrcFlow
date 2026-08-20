@@ -1,8 +1,7 @@
 import threading
-from concurrent.futures import Future
 from functools import partial
 
-from bunch_py3 import Bunch
+from pebble import ProcessFuture
 
 from orcflow import utils
 from orcflow.node import NodeType
@@ -44,7 +43,7 @@ class Scheduler:
         reference = fn.__module__, fn.__qualname__
 
         # This future exists even while the work is waiting in the OrcFlow queue.
-        future = Future()
+        future = ProcessFuture()
 
         self._queue(reference, args, kwargs, node, tag, future)
         return Result(future)
@@ -78,8 +77,9 @@ class Scheduler:
             self.running[tag] = self.running.get(tag, 0) + 1
 
         try:
-            future = self.runtime.pool.submit(execute, reference, args, kwargs, self.client, node.id, node.name)
+            future = self.runtime.pool.schedule(execute, args=(reference, args, kwargs, self.client, node.id, node.name))
         except Exception as exc:
+            print(exc)
             node.status = Status.FAILED
             self._release(tag)
 
@@ -104,59 +104,92 @@ class Scheduler:
             self.futures.pop(node_id, None)
             node = self.runtime.nodes[node_id]
 
-            # A pool worker becomes idle again when its current node completes.
             for worker in self.runtime.workers.values():
                 if worker.node is node:
                     worker.node = None
                     break
 
-            if future.cancelled():
-                node.status = Status.CANCELLED
-
-                if result is not None:
-                    result.cancel()
-
-                if reply is not None:
-                    reply.send((Status.CANCELLED, None))
-                    reply.close()
-
-                self._release(tag)
-                self._schedule_pending()
-                return
-
             try:
-                value = future.result()
-                node.status = Status.FINISHED
+                if future.cancelled():
+                    node.status = Status.CANCELLED
 
-                # Local submissions complete their placeholder future.
-                if result is not None:
-                    result.set_result(value)
+                    if result is not None:
+                        result.cancel()
 
-                # Nested submissions return through the worker's reply pipe.
-                if reply is not None:
-                    reply.send((Status.FINISHED, value))
+                    if reply is not None:
+                        try:
+                            reply.send((Status.CANCELLED, None))
+                        except (BrokenPipeError, EOFError, OSError):
+                            pass
 
-            except Exception as exc:
-                node.status = Status.FAILED
+                    return
 
-                if result is not None:
-                    result.set_exception(exc)
+                exc = future.exception()
 
-                if reply is not None:
-                    try:
-                        reply.send((Status.FAILED, exc))
-                    except Exception:
-                        # Some exception objects cannot be sent between processes.
-                        reply.send((Status.FAILED, RuntimeError(str(exc))))
+                if exc is None:
+                    value = future.result()
+                    node.status = Status.FINISHED
+
+                    if result is not None:
+                        result.set_result(value)
+
+                    if reply is not None:
+                        try:
+                            reply.send((Status.FINISHED, value))
+                        except (BrokenPipeError, EOFError, OSError):
+                            pass
+
+                else:
+                    node.status = Status.FAILED
+
+                    if result is not None:
+                        result.set_exception(exc)
+
+                    if reply is not None:
+                        try:
+                            reply.send((Status.FAILED, exc))
+                        except (BrokenPipeError, EOFError, OSError):
+                            pass
+                        except Exception:
+                            try:
+                                reply.send((Status.FAILED, RuntimeError(str(exc))))
+                            except (BrokenPipeError, EOFError, OSError):
+                                pass
 
             finally:
+                self._cancel_children(node)
+
                 if reply is not None:
                     reply.close()
 
                 self._release(tag)
-
-                # A completed task may free capacity for queued work.
                 self._schedule_pending()
+
+    def _cancel(self, node):
+        """Cancel a node and its unfinished descendants."""
+        if node.status in {
+            Status.FINISHED,
+            Status.FAILED,
+            Status.CANCELLED,
+        }:
+            return
+
+        self._cancel_children(node)
+
+        future = self.futures.get(node.id)
+
+        if future is not None:
+            future.cancel()
+
+    def _cancel_children(self, node):
+        """Cancel all unfinished children."""
+        for child in node.children:
+            if child.status not in {
+                Status.FINISHED,
+                Status.FAILED,
+                Status.CANCELLED,
+            }:
+                self._cancel(child)
 
     def _release(self, tag):
         """Release one running slot for a limited tag."""
