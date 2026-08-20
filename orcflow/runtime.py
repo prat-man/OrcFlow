@@ -1,8 +1,8 @@
-import uuid
 from copy import deepcopy
 from multiprocessing import Manager
 
 from bunch_py3 import Bunch
+from coolname import generate_slug
 from pebble import ProcessPool
 
 from orcflow import utils
@@ -14,7 +14,7 @@ class Runtime:
     """Own the process pool and execution state for one flow run."""
 
     def __init__(self, n_workers=None, concurrency=None, initializer=None, initargs=(), verbose=False):
-        self.id = uuid.uuid4().hex[:8]
+        self.id = generate_slug(2)
         self.verbose = verbose
         self.concurrency = concurrency or {}
 

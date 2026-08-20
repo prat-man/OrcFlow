@@ -1,3 +1,4 @@
+from threading import Thread
 import time
 from contextlib import redirect_stdout
 from io import StringIO
@@ -18,16 +19,7 @@ class Run(Result):
 
     def _finish(self, future):
         self.finished = time.perf_counter()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.shutdown()
-
-    def shutdown(self):
-        """Shut down the runtime for this run."""
-        self._runtime.shutdown()
+        Thread(target=self._runtime.shutdown, daemon=True).start()
 
     def tree(self):
         """Return a snapshot of the current execution tree."""

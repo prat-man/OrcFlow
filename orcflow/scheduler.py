@@ -1,5 +1,5 @@
-import threading
 from functools import partial
+from threading import RLock, Thread
 
 from pebble import ProcessFuture
 
@@ -20,10 +20,10 @@ class Scheduler:
         self.pending = []
         self.running = {}
         self.client = Client(runtime.id, runtime.verbose, self.requests)
-        self.lock = threading.RLock()
+        self.lock = RLock()
 
         # Worker requests are handled without blocking the main thread.
-        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread = Thread(target=self._run, daemon=True)
 
     def start(self):
         """Start listening for worker requests."""
