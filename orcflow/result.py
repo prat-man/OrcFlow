@@ -1,4 +1,5 @@
 from concurrent.futures import CancelledError
+from multiprocessing.connection import wait
 
 from orcflow.types import Status
 
@@ -33,8 +34,21 @@ class CompositeResult:
         self._results = results
 
     def results(self):
-        """Wait for and return all results in submission order."""
-        return [result.result() for result in self._results]
+        """Wait for and return all results in submission order, failing fast on error."""
+        futures = [result.future for result in self._results]
+        pending = set(futures)
+
+        values = [None] * len(futures)
+        index = {future: i for i, future in enumerate(futures)}
+
+        while pending:
+            ready = wait(pending)
+
+            for future in ready:
+                pending.remove(future)
+                values[index[future]] = future.result()
+
+        return values
 
     def done(self):
         """Return whether every result is ready."""
@@ -45,8 +59,25 @@ class CompositeResult:
         cancelled = [result.cancel() for result in self._results]
         return all(cancelled)
 
+    def exception(self):
+        """Wait for a failure and return its exception, or None if all results succeed."""
+        futures = [result.future for result in self._results]
+        pending = set(futures)
+
+        while pending:
+            ready = wait(pending)
+
+            for future in ready:
+                pending.remove(future)
+                exception = future.exception()
+
+                if exception is not None:
+                    return exception
+
+        return None
+
     def exceptions(self):
-        """Return all exceptions raised by the group."""
+        """Wait for all results to complete and return all exceptions they raised."""
         return [
             exception
             for result in self._results
@@ -103,3 +134,7 @@ class WorkerFuture:
             self._resolved = True
 
         return self._status, self._value
+
+    def fileno(self):
+        """Return the underlying reply connection handle."""
+        return self.receiver.fileno()

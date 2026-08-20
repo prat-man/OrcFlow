@@ -42,8 +42,12 @@ class Run(Result):
         end = self.finished if self.finished is not None else time.perf_counter()
         return end - self.started
 
+    def status(self):
+        """Return the current status of the run."""
+        return self._runtime.get_root().status
+
     def print(self):
-        """Print the current run status."""
+        """Print detailed information about the current run."""
         counts = self.counts()
         capacity = self.capacity()
         workers = self.workers()

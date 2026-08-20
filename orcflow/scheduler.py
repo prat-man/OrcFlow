@@ -79,7 +79,6 @@ class Scheduler:
         try:
             future = self.runtime.pool.schedule(execute, args=(reference, args, kwargs, self.client, node.id, node.name))
         except Exception as exc:
-            print(exc)
             node.status = Status.FAILED
             self._release(tag)
 
