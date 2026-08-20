@@ -59,7 +59,6 @@ class BoundTask:
     def submit(self, *args, **kwargs):
         """Submit this task under its bound parent node."""
         name = self.task.get_name(*args, **kwargs)
-
         return self.runtime.run(self.task.fn, *args, parent=self.parent, name=name, tag=self.task.tag, timeout=self.task.timeout, **kwargs)
 
     def map(self, arguments):
