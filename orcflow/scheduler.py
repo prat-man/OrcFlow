@@ -34,7 +34,7 @@ class Scheduler:
         self.requests.put((Request.STOP,))
         self.thread.join()
 
-    def submit(self, fn, *args, node=None, parent=None, name=None, tag=None, **kwargs):
+    def submit(self, fn, *args, node=None, parent=None, name=None, tag=None, timeout=None, **kwargs):
         """Accept a flow or task for execution."""
         if node is None:
             node = self.runtime.nodes[parent].add(name, NodeType.TASK)
@@ -45,10 +45,10 @@ class Scheduler:
         # This future exists even while the work is waiting in the OrcFlow queue.
         future = ProcessFuture()
 
-        self._queue(reference, args, kwargs, node, tag, future)
+        self._queue(reference, args, kwargs, node, tag, timeout, future)
         return Result(future)
 
-    def _queue(self, reference, args, kwargs, node, tag=None, future=None, reply=None):
+    def _queue(self, reference, args, kwargs, node, tag=None, timeout=None, future=None, reply=None):
         """Queue work until its concurrency limit allows it to run."""
         with self.lock:
             self.runtime.nodes[node.id] = node
@@ -57,7 +57,7 @@ class Scheduler:
             if self.runtime.verbose:
                 utils.log(Status.QUEUED, node.name, self.runtime)
 
-            work = reference, args, kwargs, node, tag, future, reply
+            work = reference, args, kwargs, node, tag, timeout, future, reply
 
             if self._can_schedule(tag):
                 self._schedule(*work)
@@ -71,13 +71,16 @@ class Scheduler:
 
         return self.running.get(tag, 0) < self.runtime.concurrency[tag]
 
-    def _schedule(self, reference, args, kwargs, node, tag=None, result=None, reply=None):
+    def _schedule(self, reference, args, kwargs, node, tag=None, timeout=None, result=None, reply=None):
         """Put queued work onto the process pool."""
         if tag in self.runtime.concurrency:
             self.running[tag] = self.running.get(tag, 0) + 1
 
         try:
-            future = self.runtime.pool.schedule(execute, args=(reference, args, kwargs, self.client, node.id, node.name))
+            future = self.runtime.pool.schedule(
+                execute,
+                args=(reference, args, kwargs, self.client, node.id, node.name),
+                timeout=timeout)
         except Exception as exc:
             node.status = Status.FAILED
             self._release(tag)
@@ -230,10 +233,10 @@ class Scheduler:
                 continue
 
             if kind == Request.SUBMIT:
-                _, reference, args, kwargs, parent_id, name, tag, reply = message
+                _, reference, args, kwargs, parent_id, name, tag, timeout, reply = message
 
                 # The real tree lives in the parent process.
                 parent = self.runtime.nodes[parent_id]
                 node = parent.add(name, NodeType.TASK)
 
-                self._queue(reference, args, kwargs, node, tag, reply=reply)
+                self._queue(reference, args, kwargs, node, tag, timeout, reply=reply)

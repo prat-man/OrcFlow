@@ -37,9 +37,9 @@ class Runtime:
         if self.verbose:
             utils.log(Status.ORCHESTRATE, None, self)
 
-    def run(self, fn, *args, node=None, parent=None, name=None, tag=None, **kwargs):
+    def run(self, fn, *args, node=None, parent=None, name=None, tag=None, timeout=None, **kwargs):
         """Submit work through this runtime's scheduler."""
-        return self.scheduler.submit(fn, *args, node=node, parent=parent, name=name, tag=tag, **kwargs)
+        return self.scheduler.submit(fn, *args, node=node, parent=parent, name=name, tag=tag, timeout=timeout, **kwargs)
 
     def shutdown(self):
         """Finish outstanding work and release runtime resources."""

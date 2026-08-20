@@ -54,13 +54,13 @@ class Client:
         self.verbose = verbose
         self.requests = requests
 
-    def run(self, fn, *args, parent=None, name=None, tag=None, **kwargs):
+    def run(self, fn, *args, parent=None, name=None, tag=None, timeout=None, **kwargs):
         """Ask the parent scheduler to run a nested task."""
         reference = fn.__module__, fn.__qualname__
 
         # Each nested task gets a private one-way reply pipe.
         receiver, sender = Pipe(duplex=False)
-        self.requests.put((Request.SUBMIT, reference, args, kwargs, parent, name, tag, sender))
+        self.requests.put((Request.SUBMIT, reference, args, kwargs, parent, name, tag, timeout, sender))
         return Result(WorkerFuture(receiver, sender))
 
     def set_running(self, node_id):

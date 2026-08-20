@@ -7,10 +7,20 @@ from orcflow.result import CompositeResult
 class Task:
     """Wrap a reusable OrcFlow task function."""
 
-    def __init__(self, fn, name=None, tag=None):
+    def __init__(self, fn, name=None, tag=None, timeout=None):
         self.fn = fn
         self.name = name or fn.__name__
         self.tag = tag
+        self.timeout = timeout
+
+    def with_options(self, *, name=None, tag=None, timeout=None):
+        """Return a copy of this task with updated options."""
+        return Task(
+            self.fn,
+            name=self.name if name is None else name,
+            tag=self.tag if tag is None else tag,
+            timeout=self.timeout if timeout is None else timeout,
+        )
 
     def get_name(self, *args, **kwargs):
         """Resolve the display name for this task call."""
@@ -41,11 +51,16 @@ class BoundTask:
         self.runtime = runtime
         self.parent = parent
 
+    def with_options(self, *, name=None, tag=None, timeout=None):
+        """Return a copy of this bound task with updated options."""
+        task = self.task.with_options(name=name, tag=tag, timeout=timeout)
+        return BoundTask(task, self.runtime, self.parent)
+
     def submit(self, *args, **kwargs):
         """Submit this task under its bound parent node."""
         name = self.task.get_name(*args, **kwargs)
 
-        return self.runtime.run(self.task.fn, *args, parent=self.parent, name=name, tag=self.task.tag, **kwargs)
+        return self.runtime.run(self.task.fn, *args, parent=self.parent, name=name, tag=self.task.tag, timeout=self.task.timeout, **kwargs)
 
     def map(self, arguments):
         """Submit this task once for each argument mapping."""
@@ -59,10 +74,10 @@ class BoundTask:
         )
 
 
-def task(fn=None, *, name=None, tag=None):
+def task(fn=None, *, name=None, tag=None, timeout=None):
     """Decorate a function as a task."""
     def decorate(fn):
-        return Task(fn, name=name, tag=tag)
+        return Task(fn, name=name, tag=tag, timeout=timeout)
 
     if fn is None:
         return decorate

@@ -8,16 +8,17 @@ from orcflow.node import Node, NodeType
 class Flow:
     """Wrap a function as an OrcFlow flow."""
 
-    def __init__(self, fn, name=None, n_workers=None, concurrency=None, initializer=None, initargs=(), verbose=False):
+    def __init__(self, fn, name=None, n_workers=None, concurrency=None, initializer=None, initargs=(), timeout=None, verbose=False):
         self.fn = fn
         self.name = name or fn.__name__
         self.n_workers = n_workers
         self.concurrency = concurrency or {}
         self.initializer = initializer
         self.initargs = initargs
+        self.timeout = timeout
         self.verbose = verbose
 
-    def with_options(self, *, name=None, n_workers=None, concurrency=None, initializer=None, initargs=None, verbose=None):
+    def with_options(self, *, name=None, n_workers=None, concurrency=None, initializer=None, initargs=None, timeout=None, verbose=None):
         """Return a copy of this flow with updated options."""
         return Flow(
             self.fn,
@@ -26,6 +27,7 @@ class Flow:
             concurrency=self.concurrency if concurrency is None else concurrency,
             initializer=self.initializer if initializer is None else initializer,
             initargs=self.initargs if initargs is None else initargs,
+            timeout=self.timeout if timeout is None else timeout,
             verbose=self.verbose if verbose is None else verbose,
         )
 
@@ -51,11 +53,11 @@ class Flow:
         name = self.get_name(*args, **kwargs)
         runtime.root = Node(name, NodeType.FLOW)
 
-        result = runtime.run(self.fn, *args, node=runtime.root, **kwargs)
+        result = runtime.run(self.fn, *args, node=runtime.root, timeout=self.timeout, **kwargs)
         return Run(result=result, runtime=runtime)
 
 
-def flow(fn=None, *, name=None, n_workers=None, concurrency=None, initializer=None, initargs=(), verbose=False):
+def flow(fn=None, *, name=None, n_workers=None, concurrency=None, initializer=None, initargs=(), timeout=None, verbose=False):
     """Decorate a function as a flow."""
     def decorate(fn):
         return Flow(
@@ -65,6 +67,7 @@ def flow(fn=None, *, name=None, n_workers=None, concurrency=None, initializer=No
             concurrency=concurrency,
             initializer=initializer,
             initargs=initargs,
+            timeout=timeout,
             verbose=verbose,
         )
 
