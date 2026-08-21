@@ -106,9 +106,9 @@ class Scheduler:
             self.futures.pop(node_id, None)
             node = self.runtime.nodes[node_id]
 
-            for worker in self.runtime.workers.values():
+            for pid, worker in self.runtime.workers.items():
                 if worker.node is node:
-                    worker.node = None
+                    del self.runtime.workers[pid]
                     break
 
             try:
@@ -230,9 +230,7 @@ class Scheduler:
                         node.status = Status.RUNNING
                         worker.node = node
 
-                continue
-
-            if kind == Request.SUBMIT:
+            elif kind == Request.SUBMIT:
                 _, reference, args, kwargs, parent_id, name, tag, timeout, reply = message
 
                 # The real tree lives in the parent process.
@@ -240,3 +238,7 @@ class Scheduler:
                 node = parent.add(name, NodeType.TASK)
 
                 self._queue(reference, args, kwargs, node, tag, timeout, reply=reply)
+
+            elif kind == Request.PROGRESS:
+                _, node_id, value = message
+                self.runtime.nodes[node_id].progress = value

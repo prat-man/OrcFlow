@@ -20,6 +20,22 @@ def color_status(status):
     return f"{color}{status.value}{COLOR_RESET}"
 
 
+def format_time(seconds):
+    if seconds < 60:
+        return f"{int(seconds)}s"
+
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return f"{minutes}m {int(seconds % 60):02d}s"
+
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h {minutes % 60:02d}m"
+
+    days = hours // 24
+    return f"{days}d {hours % 24:02d}h"
+
+
 def log(status, name=None, runtime=None):
     """Print one OrcFlow lifecycle message."""
     message = f"{ORCFLOW_PREFIX} {color_status(status)}"

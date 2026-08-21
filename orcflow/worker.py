@@ -67,6 +67,12 @@ class Client:
         """Tell the scheduler that this node has started running."""
         self.requests.put((Status.RUNNING, node_id, os.getpid()))
 
+    def progress(self, node_id, value):
+        """Report progress for a running node."""
+        if value is not None and not 0 <= value <= 1:
+            raise ValueError("Progress must be None or between 0 and 1.")
+        self.requests.put((Request.PROGRESS, node_id, value))
+
 
 def resolve(reference):
     """Resolve an importable function reference inside a worker process."""

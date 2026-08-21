@@ -1,3 +1,4 @@
+import math
 import uuid
 from enum import Enum
 
@@ -17,6 +18,7 @@ class Node:
         self.name = name
         self.type = type
         self.status = None
+        self.progress = None
         self.children = []
 
     def add(self, name, type):
@@ -26,7 +28,10 @@ class Node:
         return child
 
     def _format(self):
-        return f"{self.name} ({self.type.value}, {utils.color_status(self.status)})"
+        details = [self.type.value, utils.color_status(self.status)]
+        if self.progress is not None:
+            details.append(f"{math.floor(self.progress * 100)}%")
+        return f"{self.name} ({', '.join(details)})"
 
     def _print_children(self, prefix="  ", depth=None):
         if depth == 0:

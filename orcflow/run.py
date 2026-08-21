@@ -1,8 +1,10 @@
+import math
 from threading import Thread
 import time
 from contextlib import redirect_stdout
 from io import StringIO
 
+from orcflow import utils
 from orcflow.result import Result
 
 
@@ -54,6 +56,7 @@ class Run(Result):
 
         pid_width = 8
         node_width = 20
+        progress_width = 10
         cpu_num_width = 8
         cpu_percent_width = 8
         memory_width = 12
@@ -65,6 +68,7 @@ class Run(Result):
             f"{table_indent}"
             f"{'PID':<{pid_width}}"
             f"{'NODE':<{node_width}}"
+            f"{'PROGRESS':>{progress_width}}"
             f"{'CPU #':>{cpu_num_width}}"
             f"{'CPU %':>{cpu_percent_width}}"
             f"{'MEMORY':>{memory_width}}"
@@ -87,7 +91,7 @@ class Run(Result):
 
         row("Run")
         row(f"  {'Runtime':<10}{self._runtime.id}")
-        row(f"  {'Elapsed':<10}{self.elapsed():.2f}s")
+        row(f"  {'Elapsed':<10}{utils.format_time(self.elapsed())}")
         row(f"  {'Done':<10}{self.done()}")
         row()
 
@@ -110,26 +114,31 @@ class Run(Result):
 
         row()
         row("Workers")
-        row(header)
+        if workers:
+            row(header)
 
-        for worker in workers:
-            node = "-" if worker.node is None else worker.node.name
+            for worker in workers:
+                node = "-" if worker.node is None else worker.node.name
+                progress = "-" if worker.node is None or worker.node.progress is None else f"{math.floor(worker.node.progress * 100)}%"
 
-            cpu_num = worker.cpu_num()
-            cpu_num = "-" if cpu_num is None else str(cpu_num)
+                cpu_num = worker.cpu_num()
+                cpu_num = "-" if cpu_num is None else str(cpu_num)
 
-            cpu_percent = f"{worker.cpu_percent():.1f}%"
-            memory = f"{worker.memory() / 1024**2:.1f} MB"
-            threads = str(worker.threads())
+                cpu_percent = f"{worker.cpu_percent():.1f}%"
+                memory = f"{worker.memory() / 1024**2:.1f} MB"
+                threads = str(worker.threads())
 
-            row(
-                f"{table_indent}"
-                f"{worker.pid:<{pid_width}}"
-                f"{node:<{node_width}}"
-                f"{cpu_num:>{cpu_num_width}}"
-                f"{cpu_percent:>{cpu_percent_width}}"
-                f"{memory:>{memory_width}}"
-                f"{threads:>{threads_width}}"
-            )
+                row(
+                    f"{table_indent}"
+                    f"{worker.pid:<{pid_width}}"
+                    f"{node:<{node_width}}"
+                    f"{progress:>{progress_width}}"
+                    f"{cpu_num:>{cpu_num_width}}"
+                    f"{cpu_percent:>{cpu_percent_width}}"
+                    f"{memory:>{memory_width}}"
+                    f"{threads:>{threads_width}}"
+                )
+        else:
+            row("  No active workers")
 
         print(bottom)

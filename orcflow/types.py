@@ -16,5 +16,6 @@ class Status(Enum):
 class Request(Enum):
     """Requests sent to the scheduler."""
 
-    SUBMIT = "submit"
     STOP = "stop"
+    SUBMIT = "submit"
+    PROGRESS = "progress"

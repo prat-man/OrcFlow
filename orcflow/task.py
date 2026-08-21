@@ -1,3 +1,4 @@
+from functools import partial
 from inspect import signature
 from types import FunctionType
 
@@ -92,6 +93,8 @@ def bind_tasks(fn, runtime, parent):
     for name, value in globals_.items():
         if isinstance(value, Task):
             globals_[name] = value.bind(runtime, parent)
+        elif value is progress:
+            globals_[name] = partial(runtime.progress, parent)
 
     return FunctionType(
         fn.__code__,
@@ -100,3 +103,8 @@ def bind_tasks(fn, runtime, parent):
         fn.__defaults__,
         fn.__closure__,
     )
+
+
+def progress(value):
+    """Report progress for the currently executing task."""
+    raise RuntimeError("progress() can only be called from an OrcFlow task.")
