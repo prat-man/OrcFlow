@@ -1,3 +1,4 @@
+import atexit
 import math
 from threading import Thread
 import time
@@ -18,10 +19,21 @@ class Run(Result):
         self.started = time.perf_counter()
         self.finished = None
         self.future.add_done_callback(self._finish)
+        atexit.register(self.shutdown)
+    
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.shutdown()
+
+    def shutdown(self):
+        """Shut down the runtime for this run."""
+        self._runtime.shutdown()
+        atexit.unregister(self.shutdown)
 
     def _finish(self, future):
         self.finished = time.perf_counter()
-        Thread(target=self._runtime.shutdown, daemon=True).start()
 
     def tree(self):
         """Return a snapshot of the current execution tree."""
