@@ -167,40 +167,41 @@ class Scheduler:
 
     def _cancel(self, node):
         """Cancel a node and its unfinished descendants."""
-        if node.status in {
-            Status.FINISHED,
-            Status.FAILED,
-            Status.CANCELLED,
-        }:
-            return
-
-        self._cancel_children(node)
-
-        for work in list(self.pending):
-            if work[3] is node:
-                self.pending.remove(work)
-
-                _, _, _, _, _, _, result, reply = work
-
-                node.status = Status.CANCELLED
-
-                if result is not None:
-                    result.cancel()
-
-                if reply is not None:
-                    try:
-                        reply.send((Status.CANCELLED, None))
-                    except (BrokenPipeError, EOFError, OSError):
-                        pass
-                    finally:
-                        reply.close()
-
+        with self.lock:
+            if node.status in {
+                Status.FINISHED,
+                Status.FAILED,
+                Status.CANCELLED,
+            }:
                 return
 
-        future = self.futures.get(node.id)
+            self._cancel_children(node)
 
-        if future is not None:
-            future.cancel()
+            for work in list(self.pending):
+                if work[3] is node:
+                    self.pending.remove(work)
+
+                    _, _, _, _, _, _, result, reply = work
+
+                    node.status = Status.CANCELLED
+
+                    if result is not None:
+                        result.cancel()
+
+                    if reply is not None:
+                        try:
+                            reply.send((Status.CANCELLED, None))
+                        except (BrokenPipeError, EOFError, OSError):
+                            pass
+                        finally:
+                            reply.close()
+
+                    return
+
+            future = self.futures.get(node.id)
+
+            if future is not None:
+                future.cancel()
 
     def _cancel_children(self, node):
         """Cancel all unfinished children."""
