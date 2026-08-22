@@ -20,7 +20,7 @@ class Handle:
         return self._future.done()
 
     def cancel(self):
-        """Try to cancel the underlying work."""
+        """Request cancellation of the underlying work."""
         self._cancel()
 
     def exception(self):
@@ -56,9 +56,9 @@ class GroupHandle:
         return all(handle.done() for handle in self._handles)
 
     def cancel(self):
-        """Try to cancel all underlying work."""
-        cancelled = [handle.cancel() for handle in self._handles]
-        return all(cancelled)
+        """Request cancellation of all underlying work."""
+        for handle in self._handles:
+            handle.cancel()
 
     def exception(self):
         """Wait for a failure and return its exception, or None if all results succeed."""

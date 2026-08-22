@@ -43,11 +43,10 @@ class Runtime:
 
     def shutdown(self):
         """Finish outstanding work and release runtime resources."""
-        with self.scheduler.lock:
-            self.pool.close()
-            self.pool.join()
-            self.scheduler.stop()
-            self.manager.shutdown()
+        self.pool.close()
+        self.pool.join()
+        self.scheduler.stop()
+        self.manager.shutdown()
 
         if self.verbose:
             utils.log(Status.SHUTDOWN, None, self)
