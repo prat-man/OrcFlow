@@ -59,10 +59,8 @@ class Scheduler:
 
             work = reference, args, kwargs, node, tag, timeout, future, reply
 
-            if self._can_schedule(tag):
-                self._schedule(*work)
-            else:
-                self.pending.append(work)
+            self.pending.append(work)
+            self._schedule_pending()
 
     def _can_schedule(self, tag):
         """Return whether a tag currently has capacity."""
@@ -177,6 +175,27 @@ class Scheduler:
             return
 
         self._cancel_children(node)
+
+        for work in list(self.pending):
+            if work[3] is node:
+                self.pending.remove(work)
+
+                _, _, _, _, _, _, result, reply = work
+
+                node.status = Status.CANCELLED
+
+                if result is not None:
+                    result.cancel()
+
+                if reply is not None:
+                    try:
+                        reply.send((Status.CANCELLED, None))
+                    except (BrokenPipeError, EOFError, OSError):
+                        pass
+                    finally:
+                        reply.close()
+
+                return
 
         future = self.futures.get(node.id)
 
