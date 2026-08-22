@@ -90,7 +90,6 @@ class Scheduler:
                 reply.send((Status.FAILED, exc))
                 reply.close()
 
-            self._schedule_pending()
             return
 
         self.futures[node.id] = future
