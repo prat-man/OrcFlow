@@ -6,7 +6,7 @@ from pebble import ProcessFuture
 from orcflow import utils
 from orcflow.node import NodeType
 from orcflow.types import Request, Status
-from orcflow.result import Result
+from orcflow.handle import Handle
 from orcflow.worker import Client, Worker, execute
 
 
@@ -46,7 +46,7 @@ class Scheduler:
         future = ProcessFuture()
 
         self._queue(reference, args, kwargs, node, tag, timeout, future)
-        return Result(future)
+        return Handle(future, lambda: self._cancel(node))
 
     def _queue(self, reference, args, kwargs, node, tag=None, timeout=None, future=None, reply=None):
         """Queue work until its concurrency limit allows it to run."""
@@ -71,7 +71,7 @@ class Scheduler:
 
         return self.running.get(tag, 0) < self.runtime.concurrency[tag]
 
-    def _schedule(self, reference, args, kwargs, node, tag=None, timeout=None, result=None, reply=None):
+    def _schedule(self, reference, args, kwargs, node, tag=None, timeout=None, handle=None, reply=None):
         """Put queued work onto the process pool."""
         if tag in self.runtime.concurrency:
             self.running[tag] = self.running.get(tag, 0) + 1
@@ -85,8 +85,8 @@ class Scheduler:
             node.status = Status.FAILED
             self._release(tag)
 
-            if result is not None:
-                result.set_exception(exc)
+            if handle is not None:
+                handle.set_exception(exc)
 
             if reply is not None:
                 reply.send((Status.FAILED, exc))
@@ -98,9 +98,9 @@ class Scheduler:
         self.futures[node.id] = future
 
         # Keep this task's tag and result channels attached to its future.
-        future.add_done_callback(partial(self._complete, node.id, tag, result, reply))
+        future.add_done_callback(partial(self._complete, node.id, tag, handle, reply))
 
-    def _complete(self, node_id, tag, result, reply, future):
+    def _complete(self, node_id, tag, handle, reply, future):
         """Record completion and release the task's concurrency slot."""
         with self.lock:
             self.futures.pop(node_id, None)
@@ -115,8 +115,8 @@ class Scheduler:
                 if future.cancelled():
                     node.status = Status.CANCELLED
 
-                    if result is not None:
-                        result.cancel()
+                    if handle is not None:
+                        handle.cancel()
 
                     if reply is not None:
                         try:
@@ -132,8 +132,8 @@ class Scheduler:
                     value = future.result()
                     node.status = Status.FINISHED
 
-                    if result is not None:
-                        result.set_result(value)
+                    if handle is not None:
+                        handle.set_result(value)
 
                     if reply is not None:
                         try:
@@ -144,8 +144,8 @@ class Scheduler:
                 else:
                     node.status = Status.FAILED
 
-                    if result is not None:
-                        result.set_exception(exc)
+                    if handle is not None:
+                        handle.set_exception(exc)
 
                     if reply is not None:
                         try:
@@ -231,13 +231,18 @@ class Scheduler:
                         worker.node = node
 
             elif kind == Request.SUBMIT:
-                _, reference, args, kwargs, parent_id, name, tag, timeout, reply = message
+                _, reference, args, kwargs, node_id, parent_id, name, tag, timeout, reply = message
 
                 # The real tree lives in the parent process.
                 parent = self.runtime.nodes[parent_id]
-                node = parent.add(name, NodeType.TASK)
+                node = parent.add(name, NodeType.TASK, node_id)
 
                 self._queue(reference, args, kwargs, node, tag, timeout, reply=reply)
+
+            elif kind == Request.CANCEL:
+                _, node_id = message
+                node = self.runtime.nodes[node_id]
+                self._cancel(node)
 
             elif kind == Request.PROGRESS:
                 _, node_id, value = message

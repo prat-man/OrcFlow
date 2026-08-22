@@ -1,41 +1,42 @@
-from concurrent.futures import CancelledError
+from concurrent.futures import CancelledError, Future
 from multiprocessing.connection import wait
 
 from orcflow.types import Status
 
 
-class Result:
+class Handle:
     """Expose a small, common interface for task and flow results."""
 
-    def __init__(self, future):
-        self.future = future
+    def __init__(self, future, cancel):
+        self._future = future
+        self._cancel = cancel
 
     def result(self):
         """Wait for and return the result."""
-        return self.future.result()
+        return self._future.result()
 
     def done(self):
         """Return whether the result is ready."""
-        return self.future.done()
+        return self._future.done()
 
     def cancel(self):
         """Try to cancel the underlying work."""
-        return self.future.cancel()
+        self._cancel()
 
     def exception(self):
         """Return the exception raised by the work, if any."""
-        return self.future.exception()
+        return self._future.exception()
 
 
-class CompositeResult:
+class GroupHandle:
     """Represent a group of results as one result."""
 
-    def __init__(self, results):
-        self._results = results
+    def __init__(self, handles):
+        self._handles = handles
 
     def results(self):
         """Wait for and return all results in submission order, failing fast on error."""
-        futures = [result.future for result in self._results]
+        futures = [handle._future for handle in self._handles]
         pending = set(futures)
 
         values = [None] * len(futures)
@@ -52,16 +53,16 @@ class CompositeResult:
 
     def done(self):
         """Return whether every result is ready."""
-        return all(result.done() for result in self._results)
+        return all(handle.done() for handle in self._handles)
 
     def cancel(self):
         """Try to cancel all underlying work."""
-        cancelled = [result.cancel() for result in self._results]
+        cancelled = [handle.cancel() for handle in self._handles]
         return all(cancelled)
 
     def exception(self):
         """Wait for a failure and return its exception, or None if all results succeed."""
-        futures = [result.future for result in self._results]
+        futures = [handle._future for handle in self._handles]
         pending = set(futures)
 
         while pending:
@@ -80,12 +81,12 @@ class CompositeResult:
         """Wait for all results to complete and return all exceptions they raised."""
         return [
             exception
-            for result in self._results
-            if (exception := result.exception()) is not None
+            for handle in self._handles
+            if (exception := handle.exception()) is not None
         ]
 
 
-class WorkerFuture:
+class WorkerFuture(Future):
     """Wait for a nested task result sent back to this worker."""
 
     def __init__(self, receiver, sender):

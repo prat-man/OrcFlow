@@ -3,10 +3,11 @@ import importlib
 import os
 import sys
 from multiprocessing import Pipe
+import uuid
 from psutil import Process
 
 from orcflow import utils
-from orcflow.result import Result, WorkerFuture
+from orcflow.handle import Handle, WorkerFuture
 from orcflow.types import Request, Status
 from orcflow.task import Task, bind_tasks
 
@@ -58,14 +59,21 @@ class Client:
         """Ask the parent scheduler to run a nested task."""
         reference = fn.__module__, fn.__qualname__
 
+        # Generate a new node ID
+        node_id = uuid.uuid4().hex
+
         # Each nested task gets a private one-way reply pipe.
         receiver, sender = Pipe(duplex=False)
-        self.requests.put((Request.SUBMIT, reference, args, kwargs, parent, name, tag, timeout, sender))
-        return Result(WorkerFuture(receiver, sender))
+        self.requests.put((Request.SUBMIT, reference, args, kwargs, node_id, parent, name, tag, timeout, sender))
+        return Handle(WorkerFuture(receiver, sender), lambda: self.cancel(node_id))
 
     def set_running(self, node_id):
         """Tell the scheduler that this node has started running."""
         self.requests.put((Status.RUNNING, node_id, os.getpid()))
+        
+    def cancel(self, node_id):
+        """Ask the parent scheduler to cancel a nested task."""
+        self.requests.put((Request.CANCEL, node_id))
 
     def progress(self, node_id, value):
         """Report progress for a running node."""

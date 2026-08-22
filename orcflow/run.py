@@ -1,24 +1,21 @@
 import atexit
 import math
-from threading import Thread
 import time
-from contextlib import redirect_stdout
-from io import StringIO
 
 from orcflow import utils
-from orcflow.result import Result
+from orcflow.handle import Handle
 
 
-class Run(Result):
+class Run(Handle):
     """Represent a running flow and its runtime state."""
 
-    def __init__(self, result, runtime):
-        super().__init__(result.future)
+    def __init__(self, handle, runtime):
+        super().__init__(handle._future, handle.cancel)
         self._runtime = runtime
 
         self.started = time.perf_counter()
         self.finished = None
-        self.future.add_done_callback(self._finish)
+        self._future.add_done_callback(self._finish)
         atexit.register(self.shutdown)
     
     def __enter__(self):

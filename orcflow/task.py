@@ -2,7 +2,7 @@ from functools import partial
 from inspect import signature
 from types import FunctionType
 
-from orcflow.result import CompositeResult
+from orcflow.handle import GroupHandle
 
 
 class Task:
@@ -64,8 +64,8 @@ class BoundTask:
 
     def map(self, arguments):
         """Submit this task once for each argument mapping."""
-        results = [self.submit(**values) for values in arguments]
-        return CompositeResult(results)
+        handles = [self.submit(**values) for values in arguments]
+        return GroupHandle(handles)
 
     def __call__(self, *args, **kwargs):
         raise TypeError(

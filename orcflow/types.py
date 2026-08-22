@@ -18,4 +18,5 @@ class Request(Enum):
 
     STOP = "stop"
     SUBMIT = "submit"
+    CANCEL = "cancel"
     PROGRESS = "progress"

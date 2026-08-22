@@ -1,14 +1,14 @@
 from orcflow.flow import Flow, flow
-from orcflow.result import CompositeResult, Result
+from orcflow.handle import GroupHandle, Handle
 from orcflow.run import Run
 from orcflow.types import Status
 from orcflow.task import Task, task
 
 
 __all__ = [
-    "CompositeResult",
+    "GroupHandle",
     "Flow",
-    "Result",
+    "Handle",
     "Run",
     "Status",
     "Task",
