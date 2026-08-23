@@ -1,6 +1,8 @@
-from concurrent.futures import Future
+from concurrent.futures import CancelledError, Future
 from multiprocessing import Pipe
 from queue import Queue
+
+import pytest
 
 from orcflow.handle import ResultProxy
 from orcflow.node import Node, NodeType
@@ -65,6 +67,19 @@ def test_unlimited_work_schedules_immediately():
     assert len(runtime.pool.calls) == 1
 
 
+def test_submit_returns_handle_backed_by_result_proxy():
+    scheduler, runtime = make_scheduler()
+    node = Node("root", NodeType.FLOW)
+
+    handle = scheduler.submit(dummy, node=node)
+
+    assert isinstance(handle._proxy, ResultProxy)
+    assert node.id in scheduler.futures
+
+    scheduler.futures[node.id].set_result(42)
+    assert handle.result() == 42
+
+
 def test_tag_limit_keeps_extra_work_pending():
     scheduler, runtime = make_scheduler({"cpu": 1})
     first, _ = queue_work(scheduler, runtime, "first", "cpu")
@@ -105,6 +120,27 @@ def test_pending_cancellation_removes_work_without_consuming_tag():
     assert all(work[1] is not second for work in scheduler.pending)
     assert scheduler.running["cpu"] == 1
     assert first.id in scheduler.futures
+
+    with pytest.raises(CancelledError):
+        second_proxy.result()
+
+
+def test_pending_cancellation_records_finish_without_start():
+    scheduler, runtime = make_scheduler({"cpu": 1})
+    queue_work(scheduler, runtime, "blocker", "cpu")
+    target, target_proxy = queue_work(scheduler, runtime, "target", "cpu")
+
+    assert target.started is None
+    assert target.finished is None
+
+    scheduler._cancel(target)
+
+    assert target.status is Status.CANCELLED
+    assert target.started is None
+    assert target.finished is not None
+
+    with pytest.raises(CancelledError):
+        target_proxy.result()
 
 
 def test_cancelling_pending_work_allows_next_pending_item_to_advance():

@@ -41,6 +41,25 @@ def test_result_proxy_raises_cancelled_error():
         handle.result()
 
 
+def test_result_proxy_exception_raises_cancelled_error():
+    handle = make_handle(Status.CANCELLED)
+    with pytest.raises(CancelledError):
+        handle.exception()
+
+
+def test_result_proxy_is_not_done_before_reply():
+    receiver, sender = Pipe(duplex=False)
+    proxy = ResultProxy(receiver)
+
+    assert not proxy.done()
+
+    sender.send((Status.FINISHED, 42))
+    sender.close()
+
+    assert proxy.done()
+    assert proxy.result() == 42
+
+
 def test_handle_cancel_uses_control_callback():
     calls = []
     handle = make_handle(Status.FINISHED, 1, cancel=lambda: calls.append(True))
