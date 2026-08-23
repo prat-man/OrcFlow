@@ -1,5 +1,5 @@
 from copy import deepcopy
-from multiprocessing import Manager
+from multiprocessing import Manager, get_context
 
 from bunch_py3 import Bunch
 from coolname import generate_slug
@@ -29,7 +29,8 @@ class Runtime:
         self.scheduler = Scheduler(self)
 
         # The initializer runs once when each process-pool worker starts.
-        self.pool = ProcessPool(max_workers=n_workers, initializer=initializer, initargs=initargs)
+        self.ctx = get_context("spawn")
+        self.pool = ProcessPool(max_workers=n_workers, initializer=initializer, initargs=initargs, context=self.ctx)
 
         self.scheduler.start()
 
