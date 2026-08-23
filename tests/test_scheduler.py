@@ -35,7 +35,7 @@ class FakeRuntime:
         self.manager = FakeManager()
         self.concurrency = concurrency or {}
         self.nodes = {}
-        self.workers = {}
+        self.registry = {}
         self.pool = FakePool()
 
 
