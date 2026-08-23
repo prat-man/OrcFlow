@@ -1,3 +1,4 @@
+import threading
 from concurrent.futures import Future
 from queue import Queue
 from types import SimpleNamespace
@@ -176,3 +177,79 @@ def test_completion_releases_tag_exactly_once():
 
     assert node.status is Status.FINISHED
     assert scheduler.running["cpu"] == 0
+
+
+def test_cancel_is_idempotent_for_pending_work():
+    scheduler, runtime = make_scheduler({"cpu": 1})
+    queue_work(scheduler, runtime, "blocker", "cpu")
+    target = queue_work(scheduler, runtime, "target", "cpu")
+
+    scheduler._cancel(target)
+    scheduler._cancel(target)  # second call must be a no-op, not raise
+
+    assert target.status is Status.CANCELLED
+    assert all(work[3] is not target for work in scheduler.pending)
+
+
+def test_cancel_is_idempotent_for_running_work():
+    scheduler, runtime = make_scheduler()
+    node = queue_work(scheduler, runtime, "a")
+
+    scheduler._cancel(node)
+    scheduler._cancel(node)  # second call must be a no-op
+
+    assert node.status is Status.CANCELLED
+
+
+def test_concurrent_cancel_and_completion_do_not_corrupt_pending_state():
+    """Regression test for a race that used to exist between _cancel and
+    _schedule_pending: both iterated a snapshot of self.pending and could
+    independently call self.pending.remove(work) on the same item, and
+    the loser would raise ValueError - which, on the real scheduler
+    thread, would silently kill it. _cancel is now covered by the same
+    lock as _schedule_pending, so this must never raise, and the target
+    node must always end up in exactly one consistent place: cancelled
+    and gone from pending, or actually dispatched - never both, never
+    neither.
+
+    The interleaving is inherently timing-dependent, so this runs many
+    iterations with a fresh scheduler each time to make the race window
+    likely to be hit at least once.
+    """
+    for _ in range(50):
+        scheduler, runtime = make_scheduler({"cpu": 1})
+        queue_work(scheduler, runtime, "blocker", "cpu")
+        target = queue_work(scheduler, runtime, "target", "cpu")
+
+        errors = []
+        barrier = threading.Barrier(2)
+
+        def release():
+            barrier.wait()
+            # Resolving the blocker's future synchronously invokes
+            # _complete -> _release -> _schedule_pending on this thread.
+            runtime.pool.futures[0].set_result("done")
+
+        def cancel():
+            barrier.wait()
+            try:
+                scheduler._cancel(target)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=release), threading.Thread(target=cancel)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert errors == []
+
+        in_pending = any(work[3] is target for work in scheduler.pending)
+        in_futures = target.id in scheduler.futures
+
+        # Never left sitting untouched in pending after both threads finish.
+        assert not in_pending
+
+        # Exactly one of "got dispatched" / "got cancelled" is true, whichever thread won.
+        assert in_futures != (target.status is Status.CANCELLED)
