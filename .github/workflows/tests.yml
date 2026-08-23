@@ -21,6 +21,7 @@ jobs:
         continue-on-error: ${{ matrix.experimental }}
 
         runs-on: ${{ matrix.os }}
+        timeout-minutes: 15
 
         steps:
             - uses: actions/checkout@v7

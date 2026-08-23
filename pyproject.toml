@@ -30,11 +30,12 @@ classifiers = [
 [project.optional-dependencies]
 test = [
     "pytest>=8",
+    "pytest-timeout",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --timeout=60"
 
 [tool.setuptools.packages.find]
 where = ["."]
