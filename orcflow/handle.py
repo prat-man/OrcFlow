@@ -98,6 +98,26 @@ class GroupHandle:
         return exceptions
 
 
+class Run(Handle):
+    """Represent a flow execution."""
+
+    def __init__(self, handle, root):
+        super().__init__(handle._proxy, handle.cancel)
+        self._root = root
+
+    def tree(self):
+        """Return a snapshot of the current execution tree."""
+        return self._root
+
+    def elapsed(self):
+        """Return the elapsed run time in seconds."""
+        return self._root.elapsed()
+
+    def status(self):
+        """Return the current execution status."""
+        return self._root.status
+
+
 class ResultProxy:
     """Receive a scheduler-owned execution result through a reply channel."""
 

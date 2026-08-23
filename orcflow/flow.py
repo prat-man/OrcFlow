@@ -1,34 +1,23 @@
 from inspect import signature
 
-from orcflow.run import Run
-from orcflow.runtime import Runtime
 from orcflow.node import Node, NodeType
+from orcflow.handle import Run
 
 
 class Flow:
     """Wrap a function as an OrcFlow flow."""
 
-    def __init__(self, fn, name=None, n_workers=None, concurrency=None, initializer=None, initargs=(), timeout=None, verbose=False):
+    def __init__(self, fn, name=None, timeout=None):
         self.fn = fn
         self.name = name or fn.__name__
-        self.n_workers = n_workers
-        self.concurrency = concurrency or {}
-        self.initializer = initializer
-        self.initargs = initargs
         self.timeout = timeout
-        self.verbose = verbose
 
-    def with_options(self, *, name=None, n_workers=None, concurrency=None, initializer=None, initargs=None, timeout=None, verbose=None):
+    def with_options(self, *, name=None, timeout=None):
         """Return a copy of this flow with updated options."""
         return Flow(
             self.fn,
             name=self.name if name is None else name,
-            n_workers=self.n_workers if n_workers is None else n_workers,
-            concurrency=self.concurrency if concurrency is None else concurrency,
-            initializer=self.initializer if initializer is None else initializer,
-            initargs=self.initargs if initargs is None else initargs,
             timeout=self.timeout if timeout is None else timeout,
-            verbose=self.verbose if verbose is None else verbose,
         )
 
     def get_name(self, *args, **kwargs):
@@ -41,34 +30,32 @@ class Flow:
 
         return self.name.format(**parameters.arguments)
 
-    def __call__(self, *args, **kwargs):
+    def submit(self, runtime, *args, **kwargs):
         """Start a new run of the flow."""
-        runtime = Runtime(
-            n_workers=self.n_workers,
-            concurrency=self.concurrency,
-            initializer=self.initializer,
-            initargs=self.initargs,
-            verbose=self.verbose,
+        root = Node(
+            name=self.get_name(*args, **kwargs),
+            type=NodeType.FLOW,
         )
-        name = self.get_name(*args, **kwargs)
-        root = Node(name, NodeType.FLOW)
 
-        handle = runtime.run(self.fn, *args, node=root, timeout=self.timeout, **kwargs)
-        return Run(handle=handle, runtime=runtime, root=root)
+        handle = runtime.submit(
+            self.fn,
+            *args,
+            node=root,
+            timeout=self.timeout,
+            **kwargs,
+        )
+
+        return Run(handle, root)
 
 
-def flow(fn=None, *, name=None, n_workers=None, concurrency=None, initializer=None, initargs=(), timeout=None, verbose=False):
+def flow(fn=None, *, name=None, timeout=None):
     """Decorate a function as a flow."""
+
     def decorate(fn):
         return Flow(
             fn,
             name=name,
-            n_workers=n_workers,
-            concurrency=concurrency,
-            initializer=initializer,
-            initargs=initargs,
             timeout=timeout,
-            verbose=verbose,
         )
 
     if fn is None:

@@ -1,6 +1,5 @@
 from orcflow.flow import Flow, flow
-from orcflow.handle import GroupHandle, Handle
-from orcflow.run import Run
+from orcflow.handle import Handle, GroupHandle, Run
 from orcflow.types import Status
 from orcflow.task import Task, task
 

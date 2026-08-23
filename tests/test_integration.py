@@ -5,14 +5,13 @@ from multiprocessing import Manager
 import pytest
 
 from orcflow.flow import flow
+from orcflow.runtime import Runtime
 from orcflow.task import progress, task
 from orcflow.types import Status
 
 
 @pytest.fixture
 def manager():
-    """A Manager for creating .list()/.dict() proxies visible across the
-    worker processes a flow run spawns."""
     mgr = Manager()
     try:
         yield mgr
@@ -88,14 +87,16 @@ def cancel_flow():
 
 
 def test_basic_flow_end_to_end():
-    with basic_flow.with_options(n_workers=2)() as run:
+    with Runtime(n_workers=2) as runtime:
+        run = basic_flow.submit(runtime)
         assert run.result() == 5
         assert run.done()
         assert run.status() is Status.FINISHED
 
 
 def test_nested_map_preserves_submission_order():
-    with nested_flow.with_options(n_workers=4)() as run:
+    with Runtime(n_workers=4) as runtime:
+        run = nested_flow.submit(runtime)
         assert run.result() == [3, 7, 11]
         tree = run.tree()
         assert tree.status is Status.FINISHED
@@ -104,14 +105,17 @@ def test_nested_map_preserves_submission_order():
 
 
 def test_failure_propagates_to_flow():
-    with failure_flow.with_options(n_workers=2)() as run:
+    with Runtime(n_workers=2) as runtime:
+        run = failure_flow.submit(runtime)
         with pytest.raises(ValueError, match="expected failure"):
             run.result()
         assert run.status() is Status.FAILED
 
 
 def test_progress_reaches_tree():
-    with progress_flow.with_options(n_workers=2)() as run:
+    with Runtime(n_workers=2) as runtime:
+        run = progress_flow.submit(runtime)
+
         deadline = time.monotonic() + 5
         observed = False
 
@@ -127,8 +131,11 @@ def test_progress_reaches_tree():
 
 
 def test_group_cancellation_is_not_failure():
-    with cancel_flow.with_options(n_workers=4, concurrency={"serial": 1})() as run:
+    with Runtime(n_workers=4, concurrency={"serial": 1}) as runtime:
+        run = cancel_flow.submit(runtime)
+
         assert run.result() == "parent finished"
+
         tree = run.tree()
         parent = tree.children[0]
 
@@ -137,8 +144,6 @@ def test_group_cancellation_is_not_failure():
         assert len(parent.children) == 3
         assert all(child.status is Status.CANCELLED for child in parent.children)
 
-
-# --- timeout -------------------------------------------------------------
 
 @task(name="slow_timeout", timeout=0.2)
 def slow_timeout_task():
@@ -152,14 +157,14 @@ def timeout_flow():
 
 
 def test_task_timeout_fails_the_task():
-    with timeout_flow.with_options(n_workers=2)() as run:
+    with Runtime(n_workers=2) as runtime:
+        run = timeout_flow.submit(runtime)
+
         with pytest.raises(Exception):
             run.result()
 
         assert run.status() is Status.FAILED
 
-
-# --- initializer / initargs -----------------------------------------------
 
 def record_worker_start(log):
     log.append(os.getpid())
@@ -181,21 +186,17 @@ def test_initializer_runs_in_worker_processes(manager):
     init_log = manager.list()
     marker = manager.list()
 
-    with init_flow.with_options(
+    with Runtime(
         n_workers=2,
         initializer=record_worker_start,
         initargs=(init_log,),
-    )(marker) as run:
+    ) as runtime:
+        run = init_flow.submit(runtime, marker)
         run.result()
 
-    # At least one worker started (and ran the initializer); never more
-    # than the pool size, regardless of whether the pool spawns workers
-    # eagerly or lazily.
     assert 1 <= len(init_log) <= 2
     assert len(marker) == 4
 
-
-# --- capacity() / counts() under a live tag limit -------------------------
 
 @task(name="cap_sleep[{index}]", tag="limited")
 def cap_sleep(seconds, index):
@@ -210,45 +211,43 @@ def capacity_flow():
 
 
 def test_capacity_and_counts_reflect_tag_limit():
-    run = capacity_flow.with_options(n_workers=2, concurrency={"limited": 1})()
-    try:
+    with Runtime(n_workers=2, concurrency={"limited": 1}) as runtime:
+        run = capacity_flow.submit(runtime)
+
         deadline = time.monotonic() + 3
         used_one = False
 
         while time.monotonic() < deadline:
-            if run.capacity().tags.limited.used == 1:
+            if runtime.capacity().tags.limited.used == 1:
                 used_one = True
                 break
             time.sleep(0.02)
 
-        assert used_one, "expected exactly one 'limited' slot in use at some point"
+        assert used_one
 
-        capacity = run.capacity()
+        capacity = runtime.capacity()
         assert capacity.tags.limited.limit == 1
         assert capacity.tags.limited.free == 0
 
-        counts = run.counts()
+        counts = runtime.counts()
         assert counts.running >= 1
 
         run.result()
 
-        final_counts = run.counts()
-        assert final_counts.finished == 4  # flow root + 3 tagged tasks
+        final_counts = runtime.counts()
+        assert final_counts.finished == 4
         assert final_counts.queued == 0
         assert final_counts.running == 0
         assert final_counts.failed == 0
         assert final_counts.cancelled == 0
-    finally:
-        run.shutdown()
 
-
-# --- worker resource reporting ---------------------------------------------
 
 def test_workers_report_resource_usage():
-    run = capacity_flow.with_options(n_workers=2, concurrency={"limited": 1})()
-    try:
+    with Runtime(n_workers=2, concurrency={"limited": 1}) as runtime:
+        run = capacity_flow.submit(runtime)
+
         def has_active_worker():
-            return any(worker.node is not None for worker in run.workers())
+            return any(worker.node is not None for worker in runtime.workers())
 
         deadline = time.monotonic() + 3
         found = False
@@ -259,9 +258,10 @@ def test_workers_report_resource_usage():
                 break
             time.sleep(0.02)
 
-        assert found, "expected at least one worker to be attached to a running node"
+        assert found
 
-        active = [worker for worker in run.workers() if worker.node is not None]
+        active = [worker for worker in runtime.workers() if worker.node is not None]
+
         for worker in active:
             assert worker.pid > 0
             assert worker.memory() > 0
@@ -269,11 +269,7 @@ def test_workers_report_resource_usage():
             assert worker.cpu_percent() >= 0
 
         run.result()
-    finally:
-        run.shutdown()
 
-
-# --- GroupHandle partial failure, real processes ---------------------------
 
 @task(name="maybe_fail_real({value})")
 def maybe_fail_real(value):
@@ -302,7 +298,8 @@ def group_failure_flow(values):
 
 
 def test_group_handle_partial_failure_reporting():
-    with group_failure_flow.with_options(n_workers=4)([1, 2, 3, 4]) as run:
+    with Runtime(n_workers=4) as runtime:
+        run = group_failure_flow.submit(runtime, [1, 2, 3, 4])
         info = run.result()
 
     assert info["exception_type"] == "ValueError"
@@ -310,14 +307,12 @@ def test_group_handle_partial_failure_reporting():
     assert info["done"] is True
 
 
-# --- cloudpickle callable transport -----------------------------------------
-
 def make_closure_flow(n):
     @task
     def local_child(x):
         return x + n
 
-    @flow(n_workers=3)
+    @flow
     def local_flow():
         return local_child.submit(10).result()
 
@@ -325,12 +320,11 @@ def make_closure_flow(n):
 
 
 def test_local_flow_and_task_closures_are_supported():
-    with make_closure_flow(5)() as run:
+    with Runtime(n_workers=3) as runtime:
+        run = make_closure_flow(5).submit(runtime)
         assert run.result() == 15
         assert run.status() is Status.FINISHED
 
-
-# --- node-based timing -------------------------------------------------------
 
 @task(name="timed_child")
 def timed_child():
@@ -344,14 +338,18 @@ def timed_flow():
 
 
 def test_run_elapsed_comes_from_root_node_timing():
-    with timed_flow.with_options(n_workers=2)() as run:
+    with Runtime(n_workers=2) as runtime:
+        run = timed_flow.submit(runtime)
+
         assert run.result() == "done"
+
         tree = run.tree()
 
         assert tree.started is not None
         assert tree.finished is not None
         assert tree.finished >= tree.started
         assert run.elapsed() == pytest.approx(tree.elapsed(), abs=0.05)
+
         assert tree.children[0].started is not None
         assert tree.children[0].finished is not None
         assert tree.children[0].elapsed() > 0
