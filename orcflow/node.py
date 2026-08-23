@@ -40,6 +40,8 @@ class Node:
 
     def _format(self):
         details = [self.type.value, utils.color_status(self.status)]
+        if self.started is not None:
+            details.append(utils.format_time(self.elapsed()))
         if self.progress is not None:
             details.append(f"{math.floor(self.progress * 100)}%")
         return f"{self.name} ({', '.join(details)})"
