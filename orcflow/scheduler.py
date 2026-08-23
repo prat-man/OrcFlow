@@ -106,9 +106,9 @@ class Scheduler:
             node = self.runtime.nodes[node_id]
             node.finished = time.perf_counter()
 
-            for pid, worker in self.runtime.workers.items():
+            for pid, worker in self.runtime.registry.items():
                 if worker.node is node:
-                    del self.runtime.workers[pid]
+                    del self.runtime.registry[pid]
                     break
 
             try:
@@ -228,7 +228,7 @@ class Scheduler:
 
                 with self.lock:
                     node = self.runtime.nodes[node_id]
-                    worker = self.runtime.workers.setdefault(pid, Worker(pid))
+                    worker = self.runtime.registry.setdefault(pid, Worker(pid))
 
                     if node.status is Status.QUEUED:
                         node.status = Status.RUNNING

@@ -26,7 +26,7 @@ class Runtime:
         self.manager = Manager()
         self.n_workers = n_workers
         self.nodes = {}
-        self.workers = {}
+        self.registry = {}
         self.scheduler = Scheduler(self)
 
         # The initializer runs once when each process-pool worker starts.
@@ -58,10 +58,10 @@ class Runtime:
         if self.verbose:
             utils.log(Status.SHUTDOWN, None, self)
 
-    def get_workers(self):
+    def workers(self):
         """Return a snapshot of the current pool workers."""
         with self.scheduler.lock:
-            return [deepcopy(worker) for worker in self.workers.values()]
+            return [deepcopy(worker) for worker in self.registry.values()]
 
     def capacity(self):
         """Return the current worker and tag capacity."""
@@ -120,7 +120,7 @@ class Runtime:
         """Print detailed information about the current runtime."""
         counts = self.counts()
         capacity = self.capacity()
-        workers = self.get_workers()
+        workers = self.workers()
 
         pid_width = 8
         node_width = 20
