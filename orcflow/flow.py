@@ -51,10 +51,10 @@ class Flow:
             verbose=self.verbose,
         )
         name = self.get_name(*args, **kwargs)
-        runtime.root = Node(name, NodeType.FLOW)
+        root = Node(name, NodeType.FLOW)
 
-        handle = runtime.run(self.fn, *args, node=runtime.root, timeout=self.timeout, **kwargs)
-        return Run(handle=handle, runtime=runtime)
+        handle = runtime.run(self.fn, *args, node=root, timeout=self.timeout, **kwargs)
+        return Run(handle=handle, runtime=runtime, root=root)
 
 
 def flow(fn=None, *, name=None, n_workers=None, concurrency=None, initializer=None, initargs=(), timeout=None, verbose=False):

@@ -8,9 +8,10 @@ from orcflow.handle import Handle
 class Run(Handle):
     """Represent a running flow and its runtime state."""
 
-    def __init__(self, handle, runtime):
+    def __init__(self, handle, runtime, root):
         super().__init__(handle._proxy, handle.cancel)
         self._runtime = runtime
+        self._root = root
         atexit.register(self.shutdown)
     
     def __enter__(self):
@@ -26,7 +27,7 @@ class Run(Handle):
 
     def tree(self):
         """Return a snapshot of the current execution tree."""
-        return self._runtime.get_root()
+        return self._root
 
     def workers(self):
         """Return a snapshot of pool worker status."""
@@ -42,11 +43,11 @@ class Run(Handle):
 
     def elapsed(self):
         """Return the elapsed run time in seconds."""
-        return self._runtime.get_root().elapsed()
+        return self._root.elapsed()
 
     def status(self):
         """Return the current status of the run."""
-        return self._runtime.get_root().status
+        return self._root.status
 
     def print(self):
         """Print detailed information about the current run."""

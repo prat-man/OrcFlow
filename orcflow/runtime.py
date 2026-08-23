@@ -22,7 +22,6 @@ class Runtime:
             if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
                 raise ValueError(f"Concurrency limit for {tag!r} must be a positive integer")
 
-        self.root = None
         self.manager = Manager()
         self.n_workers = n_workers
         self.nodes = {}
@@ -55,11 +54,6 @@ class Runtime:
         """Return a snapshot of the current pool workers."""
         with self.scheduler.lock:
             return [deepcopy(worker) for worker in self.workers.values()]
-
-    def get_root(self):
-        """Return a snapshot of the execution root node."""
-        with self.scheduler.lock:
-            return deepcopy(self.root)
 
     def capacity(self):
         """Return the current worker and tag capacity."""
