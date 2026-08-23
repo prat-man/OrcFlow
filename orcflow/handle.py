@@ -62,7 +62,7 @@ class GroupHandle:
             handle.cancel()
 
     def exception(self):
-        """Wait for a failure and return its exception, or None if all results succeed."""
+        """Wait for a failure and return its exception, ignoring cancellations, or None if none failed."""
         proxies = [handle._proxy for handle in self._handles]
         pending = set(proxies)
 
@@ -71,7 +71,11 @@ class GroupHandle:
 
             for proxy in ready:
                 pending.remove(proxy)
-                exception = proxy.exception()
+
+                try:
+                    exception = proxy.exception()
+                except CancelledError:
+                    continue
 
                 if exception is not None:
                     return exception
@@ -79,12 +83,19 @@ class GroupHandle:
         return None
 
     def exceptions(self):
-        """Wait for all results to complete and return all exceptions they raised."""
-        return [
-            exception
-            for handle in self._handles
-            if (exception := handle.exception()) is not None
-        ]
+        """Wait for all results to complete and return the exceptions raised by any that failed, ignoring cancellations."""
+        exceptions = []
+
+        for handle in self._handles:
+            try:
+                exception = handle.exception()
+            except CancelledError:
+                continue
+
+            if exception is not None:
+                exceptions.append(exception)
+
+        return exceptions
 
 
 class ResultProxy:
@@ -110,7 +121,8 @@ class ResultProxy:
 
     def done(self):
         """Return whether a reply has arrived."""
-        return self._resolved or self.receiver.poll()
+        with self._lock:
+            return self._resolved or self.receiver.poll()
 
     def exception(self):
         """Wait for and return the execution exception, if any."""
