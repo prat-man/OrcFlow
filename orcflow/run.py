@@ -9,7 +9,7 @@ class Run(Handle):
     """Represent a running flow and its runtime state."""
 
     def __init__(self, handle, runtime):
-        super().__init__(handle._future, handle.cancel)
+        super().__init__(handle._proxy, handle.cancel)
         self._runtime = runtime
         atexit.register(self.shutdown)
     

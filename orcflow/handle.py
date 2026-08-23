@@ -8,17 +8,17 @@ from orcflow.types import Status
 class Handle:
     """Expose a small, common interface for task and flow results."""
 
-    def __init__(self, future, cancel):
-        self._future = future
+    def __init__(self, proxy, cancel):
+        self._proxy = proxy
         self._cancel = cancel
 
     def result(self):
         """Wait for and return the result."""
-        return self._future.result()
+        return self._proxy.result()
 
     def done(self):
         """Return whether the result is ready."""
-        return self._future.done()
+        return self._proxy.done()
 
     def cancel(self):
         """Request cancellation of the underlying work."""
@@ -26,7 +26,7 @@ class Handle:
 
     def exception(self):
         """Return the exception raised by the work, if any."""
-        return self._future.exception()
+        return self._proxy.exception()
 
 
 class GroupHandle:
@@ -37,18 +37,18 @@ class GroupHandle:
 
     def results(self):
         """Wait for and return all results in submission order, failing fast on error."""
-        futures = [handle._future for handle in self._handles]
-        pending = set(futures)
+        proxies = [handle._proxy for handle in self._handles]
+        pending = set(proxies)
 
-        values = [None] * len(futures)
-        index = {future: i for i, future in enumerate(futures)}
+        values = [None] * len(proxies)
+        index = {proxy: i for i, proxy in enumerate(proxies)}
 
         while pending:
             ready = wait(pending)
 
-            for future in ready:
-                pending.remove(future)
-                values[index[future]] = future.result()
+            for proxy in ready:
+                pending.remove(proxy)
+                values[index[proxy]] = proxy.result()
 
         return values
 
@@ -63,15 +63,15 @@ class GroupHandle:
 
     def exception(self):
         """Wait for a failure and return its exception, or None if all results succeed."""
-        futures = [handle._future for handle in self._handles]
-        pending = set(futures)
+        proxies = [handle._proxy for handle in self._handles]
+        pending = set(proxies)
 
         while pending:
             ready = wait(pending)
 
-            for future in ready:
-                pending.remove(future)
-                exception = future.exception()
+            for proxy in ready:
+                pending.remove(proxy)
+                exception = proxy.exception()
 
                 if exception is not None:
                     return exception
