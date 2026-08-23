@@ -85,24 +85,48 @@ def task(fn=None, *, name=None, tag=None, timeout=None):
     return decorate(fn)
 
 
+def _make_cell(value):
+    """Create a closure cell containing a value."""
+    return (lambda: value).__closure__[0]
+
+
+def _bind_value(value, runtime, parent):
+    """Bind OrcFlow objects captured by a function to this execution."""
+    if isinstance(value, Task):
+        return value.bind(runtime, parent)
+    if value is progress:
+        return partial(runtime.progress, parent)
+    return value
+
+
 def bind_tasks(fn, runtime, parent):
-    """Bind task globals to the runtime handling this execution."""
-    globals_ = fn.__globals__.copy()
+    """Bind task globals and closure values to the current execution."""
+    globals_ = {
+        name: _bind_value(value, runtime, parent)
+        for name, value in fn.__globals__.items()
+    }
 
-    # Replace task definitions with runtime-bound task objects for this call only.
-    for name, value in globals_.items():
-        if isinstance(value, Task):
-            globals_[name] = value.bind(runtime, parent)
-        elif value is progress:
-            globals_[name] = partial(runtime.progress, parent)
+    closure = None
+    if fn.__closure__ is not None:
+        closure = tuple(
+            _make_cell(_bind_value(cell.cell_contents, runtime, parent))
+            for cell in fn.__closure__
+        )
 
-    return FunctionType(
+    bound = FunctionType(
         fn.__code__,
         globals_,
         fn.__name__,
         fn.__defaults__,
-        fn.__closure__,
+        closure,
     )
+    bound.__kwdefaults__ = fn.__kwdefaults__
+    bound.__annotations__ = fn.__annotations__.copy()
+    bound.__dict__.update(fn.__dict__)
+    bound.__doc__ = fn.__doc__
+    bound.__module__ = fn.__module__
+    bound.__qualname__ = fn.__qualname__
+    return bound
 
 
 def progress(value):

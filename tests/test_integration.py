@@ -310,13 +310,48 @@ def test_group_handle_partial_failure_reporting():
     assert info["done"] is True
 
 
-# --- module-scope resolution guard ------------------------------------------
+# --- cloudpickle callable transport -----------------------------------------
 
-def test_locally_defined_flow_is_rejected():
-    @flow(n_workers=1)
+def make_closure_flow(n):
+    @task
+    def local_child(x):
+        return x + n
+
+    @flow(n_workers=3)
     def local_flow():
-        return 1
+        return local_child.submit(10).result()
 
-    with pytest.raises(TypeError, match="must be defined at module scope"):
-        with local_flow() as run:
-            run.result()
+    return local_flow
+
+
+def test_local_flow_and_task_closures_are_supported():
+    with make_closure_flow(5)() as run:
+        assert run.result() == 15
+        assert run.status() is Status.FINISHED
+
+
+# --- node-based timing -------------------------------------------------------
+
+@task(name="timed_child")
+def timed_child():
+    time.sleep(0.1)
+    return "done"
+
+
+@flow(name="timed_flow")
+def timed_flow():
+    return timed_child.submit().result()
+
+
+def test_run_elapsed_comes_from_root_node_timing():
+    with timed_flow.with_options(n_workers=2)() as run:
+        assert run.result() == "done"
+        tree = run.tree()
+
+        assert tree.started is not None
+        assert tree.finished is not None
+        assert tree.finished >= tree.started
+        assert run.elapsed() == pytest.approx(tree.elapsed(), abs=0.05)
+        assert tree.children[0].started is not None
+        assert tree.children[0].finished is not None
+        assert tree.children[0].elapsed() > 0

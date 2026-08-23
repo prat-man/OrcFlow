@@ -1,6 +1,5 @@
 import atexit
 import math
-import time
 
 from orcflow import utils
 from orcflow.handle import Handle
@@ -12,10 +11,6 @@ class Run(Handle):
     def __init__(self, handle, runtime):
         super().__init__(handle._future, handle.cancel)
         self._runtime = runtime
-
-        self.started = time.perf_counter()
-        self.finished = None
-        self._future.add_done_callback(self._finish)
         atexit.register(self.shutdown)
     
     def __enter__(self):
@@ -28,9 +23,6 @@ class Run(Handle):
         """Shut down the runtime for this run."""
         self._runtime.shutdown()
         atexit.unregister(self.shutdown)
-
-    def _finish(self, future):
-        self.finished = time.perf_counter()
 
     def tree(self):
         """Return a snapshot of the current execution tree."""
@@ -50,8 +42,7 @@ class Run(Handle):
 
     def elapsed(self):
         """Return the elapsed run time in seconds."""
-        end = self.finished if self.finished is not None else time.perf_counter()
-        return end - self.started
+        return self._runtime.get_root().elapsed()
 
     def status(self):
         """Return the current status of the run."""

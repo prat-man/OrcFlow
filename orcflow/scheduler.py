@@ -1,12 +1,14 @@
 from functools import partial
+import time
 from threading import RLock, Thread
 
-from pebble import ProcessFuture
+from multiprocessing import Pipe
 
 from orcflow import utils
 from orcflow.node import NodeType
 from orcflow.types import Request, Status
-from orcflow.handle import Handle
+from orcflow.handle import Handle, ResultProxy
+from orcflow.serialization import serialize_call
 from orcflow.worker import Client, Worker, execute
 
 
@@ -39,16 +41,15 @@ class Scheduler:
         if node is None:
             node = self.runtime.nodes[parent].add(name, NodeType.TASK)
 
-        # Workers resolve the function from its module and qualified name.
-        reference = fn.__module__, fn.__qualname__
+        # Serialize the callable and arguments before crossing the process boundary.
+        payload = serialize_call(fn, args, kwargs)
 
-        # This future exists even while the work is waiting in the OrcFlow queue.
-        future = ProcessFuture()
+        # Every submission receives its result through the same reply channel.
+        receiver, sender = Pipe(duplex=False)
+        self._queue(payload, node, sender, tag, timeout)
+        return Handle(ResultProxy(receiver), lambda: self._cancel(node))
 
-        self._queue(reference, args, kwargs, node, tag, timeout, future)
-        return Handle(future, lambda: self._cancel(node))
-
-    def _queue(self, reference, args, kwargs, node, tag=None, timeout=None, future=None, reply=None):
+    def _queue(self, payload, node, reply, tag=None, timeout=None):
         """Queue work until its concurrency limit allows it to run."""
         with self.lock:
             self.runtime.nodes[node.id] = node
@@ -57,7 +58,7 @@ class Scheduler:
             if self.runtime.verbose:
                 utils.log(Status.QUEUED, node.name, self.runtime)
 
-            work = reference, args, kwargs, node, tag, timeout, future, reply
+            work = payload, node, reply, tag, timeout
 
             self.pending.append(work)
             self._schedule_pending()
@@ -69,7 +70,7 @@ class Scheduler:
 
         return self.running.get(tag, 0) < self.runtime.concurrency[tag]
 
-    def _schedule(self, reference, args, kwargs, node, tag=None, timeout=None, handle=None, reply=None):
+    def _schedule(self, payload, node, reply, tag=None, timeout=None):
         """Put queued work onto the process pool."""
         if tag in self.runtime.concurrency:
             self.running[tag] = self.running.get(tag, 0) + 1
@@ -77,31 +78,34 @@ class Scheduler:
         try:
             future = self.runtime.pool.schedule(
                 execute,
-                args=(reference, args, kwargs, self.client, node.id, node.name),
+                args=(payload, self.client, node.id, node.name),
                 timeout=timeout)
         except Exception as exc:
             node.status = Status.FAILED
+            node.finished = time.perf_counter()
             self._release(tag)
 
-            if handle is not None:
-                handle.set_exception(exc)
-
-            if reply is not None:
+            try:
                 reply.send((Status.FAILED, exc))
+            except (BrokenPipeError, EOFError, OSError):
+                pass
+            finally:
                 reply.close()
 
+            self._schedule_pending()
             return
 
         self.futures[node.id] = future
 
-        # Keep this task's tag and result channels attached to its future.
-        future.add_done_callback(partial(self._complete, node.id, tag, handle, reply))
+        # The scheduler owns the real process future; callers only see replies.
+        future.add_done_callback(partial(self._complete, node.id, tag, reply))
 
-    def _complete(self, node_id, tag, handle, reply, future):
+    def _complete(self, node_id, tag, reply, future):
         """Record completion and release the task's concurrency slot."""
         with self.lock:
             self.futures.pop(node_id, None)
             node = self.runtime.nodes[node_id]
+            node.finished = time.perf_counter()
 
             for pid, worker in self.runtime.workers.items():
                 if worker.node is node:
@@ -112,14 +116,10 @@ class Scheduler:
                 if future.cancelled():
                     node.status = Status.CANCELLED
 
-                    if handle is not None:
-                        handle.cancel()
-
-                    if reply is not None:
-                        try:
-                            reply.send((Status.CANCELLED, None))
-                        except (BrokenPipeError, EOFError, OSError):
-                            pass
+                    try:
+                        reply.send((Status.CANCELLED, None))
+                    except (BrokenPipeError, EOFError, OSError):
+                        pass
 
                     return
 
@@ -129,38 +129,27 @@ class Scheduler:
                     value = future.result()
                     node.status = Status.FINISHED
 
-                    if handle is not None:
-                        handle.set_result(value)
-
-                    if reply is not None:
-                        try:
-                            reply.send((Status.FINISHED, value))
-                        except (BrokenPipeError, EOFError, OSError):
-                            pass
+                    try:
+                        reply.send((Status.FINISHED, value))
+                    except (BrokenPipeError, EOFError, OSError):
+                        pass
 
                 else:
                     node.status = Status.FAILED
 
-                    if handle is not None:
-                        handle.set_exception(exc)
-
-                    if reply is not None:
+                    try:
+                        reply.send((Status.FAILED, exc))
+                    except (BrokenPipeError, EOFError, OSError):
+                        pass
+                    except Exception:
                         try:
-                            reply.send((Status.FAILED, exc))
+                            reply.send((Status.FAILED, RuntimeError(str(exc))))
                         except (BrokenPipeError, EOFError, OSError):
                             pass
-                        except Exception:
-                            try:
-                                reply.send((Status.FAILED, RuntimeError(str(exc))))
-                            except (BrokenPipeError, EOFError, OSError):
-                                pass
 
             finally:
                 self._cancel_children(node)
-
-                if reply is not None:
-                    reply.close()
-
+                reply.close()
                 self._release(tag)
                 self._schedule_pending()
 
@@ -177,23 +166,20 @@ class Scheduler:
             self._cancel_children(node)
 
             for work in list(self.pending):
-                if work[3] is node:
+                if work[1] is node:
                     self.pending.remove(work)
 
-                    _, _, _, _, _, _, result, reply = work
+                    _, _, reply, _, _ = work
 
                     node.status = Status.CANCELLED
+                    node.finished = time.perf_counter()
 
-                    if result is not None:
-                        result.cancel()
-
-                    if reply is not None:
-                        try:
-                            reply.send((Status.CANCELLED, None))
-                        except (BrokenPipeError, EOFError, OSError):
-                            pass
-                        finally:
-                            reply.close()
+                    try:
+                        reply.send((Status.CANCELLED, None))
+                    except (BrokenPipeError, EOFError, OSError):
+                        pass
+                    finally:
+                        reply.close()
 
                     return
 
@@ -220,7 +206,7 @@ class Scheduler:
     def _schedule_pending(self):
         """Schedule queued work whose tag now has capacity."""
         for work in list(self.pending):
-            tag = work[4]
+            tag = work[3]
 
             if not self._can_schedule(tag):
                 continue
@@ -247,16 +233,17 @@ class Scheduler:
 
                     if node.status is Status.QUEUED:
                         node.status = Status.RUNNING
+                        node.started = time.perf_counter()
                         worker.node = node
 
             elif kind == Request.SUBMIT:
-                _, reference, args, kwargs, node_id, parent_id, name, tag, timeout, reply = message
+                _, payload, node_id, parent_id, name, tag, timeout, reply = message
 
                 # The real tree lives in the parent process.
                 parent = self.runtime.nodes[parent_id]
                 node = parent.add(name, NodeType.TASK, node_id)
 
-                self._queue(reference, args, kwargs, node, tag, timeout, reply=reply)
+                self._queue(payload, node, reply, tag, timeout)
 
             elif kind == Request.CANCEL:
                 _, node_id = message

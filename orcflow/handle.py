@@ -1,5 +1,6 @@
-from concurrent.futures import CancelledError, Future
+from concurrent.futures import CancelledError
 from multiprocessing.connection import wait
+from threading import Lock
 
 from orcflow.types import Status
 
@@ -86,18 +87,18 @@ class GroupHandle:
         ]
 
 
-class WorkerFuture(Future):
-    """Wait for a nested task result sent back to this worker."""
+class ResultProxy:
+    """Receive a scheduler-owned execution result through a reply channel."""
 
-    def __init__(self, receiver, sender):
+    def __init__(self, receiver):
         self.receiver = receiver
-        self.sender = sender
         self._resolved = False
         self._status = None
         self._value = None
+        self._lock = Lock()
 
     def result(self):
-        """Wait for and return the nested task result."""
+        """Wait for and return the execution result."""
         status, value = self._wait()
 
         if status is Status.FAILED:
@@ -111,12 +112,8 @@ class WorkerFuture(Future):
         """Return whether a reply has arrived."""
         return self._resolved or self.receiver.poll()
 
-    def cancel(self):
-        """Nested worker results cannot currently be cancelled."""
-        return False
-
     def exception(self):
-        """Wait for and return the nested task exception, if any."""
+        """Wait for and return the execution exception, if any."""
         status, value = self._wait()
 
         if status is Status.FAILED:
@@ -127,12 +124,14 @@ class WorkerFuture(Future):
         return None
 
     def _wait(self):
-        # The pipe blocks here until the scheduler sends this task's reply.
-        if not self._resolved:
-            self._status, self._value = self.receiver.recv()
-            self.receiver.close()
-            self.sender.close()
-            self._resolved = True
+        # Only one thread may consume the reply; later callers use the cached value.
+        with self._lock:
+            if not self._resolved:
+                try:
+                    self._status, self._value = self.receiver.recv()
+                    self._resolved = True
+                finally:
+                    self.receiver.close()
 
         return self._status, self._value
 

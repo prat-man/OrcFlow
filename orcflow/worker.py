@@ -1,15 +1,15 @@
 from copy import deepcopy
-import importlib
 import os
-import sys
 from multiprocessing import Pipe
 import uuid
+
 from psutil import Process
 
 from orcflow import utils
-from orcflow.handle import Handle, WorkerFuture
+from orcflow.handle import Handle, ResultProxy
+from orcflow.serialization import deserialize_call, serialize_call
 from orcflow.types import Request, Status
-from orcflow.task import Task, bind_tasks
+from orcflow.task import bind_tasks
 
 
 class Worker:
@@ -57,20 +57,20 @@ class Client:
 
     def run(self, fn, *args, parent=None, name=None, tag=None, timeout=None, **kwargs):
         """Ask the parent scheduler to run a nested task."""
-        reference = fn.__module__, fn.__qualname__
+        payload = serialize_call(fn, args, kwargs)
 
-        # Generate a new node ID
+        # Generate a new node ID.
         node_id = uuid.uuid4().hex
 
         # Each nested task gets a private one-way reply pipe.
         receiver, sender = Pipe(duplex=False)
-        self.requests.put((Request.SUBMIT, reference, args, kwargs, node_id, parent, name, tag, timeout, sender))
-        return Handle(WorkerFuture(receiver, sender), lambda: self.cancel(node_id))
+        self.requests.put((Request.SUBMIT, payload, node_id, parent, name, tag, timeout, sender))
+        return Handle(ResultProxy(receiver), lambda: self.cancel(node_id))
 
     def set_running(self, node_id):
         """Tell the scheduler that this node has started running."""
         self.requests.put((Status.RUNNING, node_id, os.getpid()))
-        
+
     def cancel(self, node_id):
         """Ask the parent scheduler to cancel a nested task."""
         self.requests.put((Request.CANCEL, node_id))
@@ -82,36 +82,10 @@ class Client:
         self.requests.put((Request.PROGRESS, node_id, value))
 
 
-def resolve(reference):
-    """Resolve an importable function reference inside a worker process."""
-    module_name, qualname = reference
 
-    # Spawned workers load the original script as __mp_main__.
-    if module_name == "__main__" and "__mp_main__" in sys.modules:
-        module = sys.modules["__mp_main__"]
-    else:
-        module = importlib.import_module(module_name)
-
-    value = module
-
-    for part in qualname.split("."):
-        if part == "<locals>":
-            raise TypeError("Flows and tasks must be defined at module scope when using ProcessPoolExecutor")
-        value = getattr(value, part)
-
-    # Decorators replace the module-level function with its OrcFlow wrapper.
-    if isinstance(value, Task):
-        return value.fn
-
-    if hasattr(value, "fn"):
-        return value.fn
-
-    return value
-
-
-def execute(reference, args, kwargs, client, node_id, name):
-    """Resolve and execute one flow or task inside a worker process."""
-    fn = resolve(reference)
+def execute(payload, client, node_id, name):
+    """Deserialize and execute one flow or task inside a worker process."""
+    fn, args, kwargs = deserialize_call(payload)
     fn = bind_tasks(fn, client, node_id)
 
     client.set_running(node_id)

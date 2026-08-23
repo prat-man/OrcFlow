@@ -16,8 +16,9 @@ authors = [
 
 dependencies = [
     "bunch-py3",
+    "cloudpickle",
     "coolname",
-    "pebble>=5.2",
+    "pebble",
     "psutil",
 ]
 

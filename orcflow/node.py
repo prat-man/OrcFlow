@@ -1,4 +1,5 @@
 import math
+import time
 import uuid
 from enum import Enum
 
@@ -19,7 +20,17 @@ class Node:
         self.type = type
         self.status = None
         self.progress = None
+        self.started = None
+        self.finished = None
         self.children = []
+
+    def elapsed(self):
+        """Return execution time in seconds, or zero before execution starts."""
+        if self.started is None:
+            return 0.0
+
+        end = self.finished if self.finished is not None else time.perf_counter()
+        return end - self.started
 
     def add(self, name, type, id=None):
         """Add and return a child node."""
