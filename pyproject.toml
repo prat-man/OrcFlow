@@ -9,20 +9,28 @@ description = "Lightweight process orchestration for Python"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
+
 authors = [
-  { name = "OrcFlow contributors" },
+    { name = "OrcFlow contributors" },
 ]
+
 dependencies = [
-  "cloudpickle>=3.0",
+    "bunch-py3",
+    "coolname",
+    "pebble>=5.2",
+    "psutil",
 ]
+
 classifiers = [
-  "Development Status :: 3 - Alpha",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3 :: Only",
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+test = [
+    "pytest>=8",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
