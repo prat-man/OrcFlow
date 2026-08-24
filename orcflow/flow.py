@@ -31,7 +31,7 @@ class Flow:
         return self.name.format(**parameters.arguments)
 
     def submit(self, runtime, *args, **kwargs):
-        """Start a new run of the flow."""
+        """Start a new run of the flow against an existing runtime."""
         root = Node(
             name=self.get_name(*args, **kwargs),
             type=NodeType.FLOW,
@@ -45,7 +45,13 @@ class Flow:
             **kwargs,
         )
 
-        return Run(handle, root)
+        return Run(handle, runtime, root)
+
+    def __call__(self, *args, **kwargs):
+        raise TypeError(
+            f"Flow {self.name!r} cannot be called directly. "
+            "Use .submit(runtime, ...) instead."
+        )
 
 
 def flow(fn=None, *, name=None, timeout=None):

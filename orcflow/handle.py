@@ -1,4 +1,5 @@
 from concurrent.futures import CancelledError
+from copy import deepcopy
 from multiprocessing.connection import wait
 from threading import Lock
 
@@ -101,13 +102,15 @@ class GroupHandle:
 class Run(Handle):
     """Represent a flow execution."""
 
-    def __init__(self, handle, root):
+    def __init__(self, handle, runtime, root):
         super().__init__(handle._proxy, handle.cancel)
+        self._runtime = runtime
         self._root = root
 
     def tree(self):
-        """Return a snapshot of the current execution tree."""
-        return self._root
+        """Return a synchronized snapshot of this run's execution tree."""
+        with self._runtime.scheduler.lock:
+            return deepcopy(self._root)
 
     def elapsed(self):
         """Return the elapsed run time in seconds."""

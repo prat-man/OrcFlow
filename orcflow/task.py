@@ -40,7 +40,7 @@ class Task:
     def __call__(self, *args, **kwargs):
         raise TypeError(
             f"Task {self.name!r} cannot be called directly. "
-            f"Use {self.name}.submit(...)."
+            "Use .submit(...) instead."
         )
 
 
