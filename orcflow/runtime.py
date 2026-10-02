@@ -28,6 +28,7 @@ class Runtime:
         self.nodes = {}
         self.registry = {}
         self.scheduler = Scheduler(self)
+        self._shutdown = False
 
         # The initializer runs once when each process-pool worker starts.
         self.ctx = get_context("spawn")
@@ -50,6 +51,12 @@ class Runtime:
 
     def shutdown(self):
         """Finish outstanding work and release runtime resources."""
+        if self._shutdown:
+            return
+
+        self._shutdown = True
+
+        self.scheduler.wait_idle()
         self.pool.close()
         self.pool.join()
         self.scheduler.stop()
@@ -81,11 +88,14 @@ class Runtime:
                     free=limit - used,
                 )
 
+            workers_total = self.n_workers
+            workers_free = None if workers_total is None else workers_total - workers_used
+
             return Bunch(
                 workers=Bunch(
-                    total=self.n_workers,
+                    total=workers_total,
                     used=workers_used,
-                    free=self.n_workers - workers_used,
+                    free=workers_free,
                 ),
                 tags=tags,
             )

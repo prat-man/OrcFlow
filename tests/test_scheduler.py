@@ -28,6 +28,14 @@ class FakePool:
         return future
 
 
+class FakeThread:
+    def __init__(self):
+        self.joins = 0
+
+    def join(self):
+        self.joins += 1
+
+
 class FakeRuntime:
     def __init__(self, concurrency=None):
         self.id = "test-runtime"
@@ -227,6 +235,17 @@ def test_completion_releases_tag_exactly_once():
     assert node.status is Status.FINISHED
     assert node.finished is not None
     assert scheduler.running["cpu"] == 0
+
+
+def test_stop_is_idempotent():
+    scheduler, runtime = make_scheduler()
+    scheduler.thread = FakeThread()
+
+    scheduler.stop()
+    scheduler.stop()
+
+    assert scheduler.requests.qsize() == 1
+    assert scheduler.thread.joins == 1
 
 
 def test_cancel_is_idempotent_for_pending_work():

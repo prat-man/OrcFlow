@@ -23,6 +23,7 @@ class Scheduler:
         self.running = {}
         self.client = Client(runtime.id, runtime.verbose, self.requests)
         self.lock = RLock()
+        self._stopped = False
 
         # Worker requests are handled without blocking the main thread.
         self.thread = Thread(target=self._run, daemon=True)
@@ -33,8 +34,22 @@ class Scheduler:
 
     def stop(self):
         """Stop the scheduler thread cleanly."""
+        with self.lock:
+            if self._stopped:
+                return
+            self._stopped = True
+
         self.requests.put((Request.STOP,))
         self.thread.join()
+
+    def wait_idle(self):
+        """Block until all scheduled and queued work has settled."""
+        while True:
+            with self.lock:
+                if not self.futures and not self.pending:
+                    return
+
+            time.sleep(0.01)
 
     def submit(self, fn, *args, node=None, parent=None, name=None, tag=None, timeout=None, **kwargs):
         """Accept a flow or task for execution."""

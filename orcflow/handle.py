@@ -35,23 +35,38 @@ class GroupHandle:
 
     def __init__(self, handles):
         self._handles = handles
+        self._results_resolved = False
+        self._results_value = None
+        self._results_error = None
+        self._exception_resolved = False
+        self._exception_value = None
+        self._lock = Lock()
 
     def results(self):
         """Wait for and return all results in submission order, failing fast on error."""
-        proxies = [handle._proxy for handle in self._handles]
-        pending = set(proxies)
+        with self._lock:
+            if not self._results_resolved:
+                try:
+                    self._results_value = self._collect_results()
+                except Exception as exc:
+                    self._results_error = exc
+                self._results_resolved = True
 
-        values = [None] * len(proxies)
-        index = {proxy: i for i, proxy in enumerate(proxies)}
+            if self._results_error is not None:
+                raise self._results_error
+
+            return list(self._results_value)
+
+    def _collect_results(self):
+        proxies = [handle._proxy for handle in self._handles]
+        pending = {proxy for proxy in proxies if not proxy.done()}
 
         while pending:
-            ready = wait(pending)
-
-            for proxy in ready:
+            for proxy in wait(pending):
                 pending.remove(proxy)
-                values[index[proxy]] = proxy.result()
+                proxy.result()
 
-        return values
+        return [handle.result() for handle in self._handles]
 
     def done(self):
         """Return whether every result is ready."""
@@ -64,13 +79,31 @@ class GroupHandle:
 
     def exception(self):
         """Wait for a failure and return its exception, ignoring cancellations, or None if none failed."""
+        with self._lock:
+            if not self._exception_resolved:
+                self._exception_value = self._collect_exception()
+                self._exception_resolved = True
+
+            return self._exception_value
+
+    def _collect_exception(self):
         proxies = [handle._proxy for handle in self._handles]
-        pending = set(proxies)
+        pending = {proxy for proxy in proxies if not proxy.done()}
+
+        for proxy in proxies:
+            if not proxy.done():
+                continue
+
+            try:
+                exception = proxy.exception()
+            except CancelledError:
+                continue
+
+            if exception is not None:
+                return exception
 
         while pending:
-            ready = wait(pending)
-
-            for proxy in ready:
+            for proxy in wait(pending):
                 pending.remove(proxy)
 
                 try:
@@ -129,6 +162,7 @@ class ResultProxy:
         self._resolved = False
         self._status = None
         self._value = None
+        self._error = None
         self._lock = Lock()
 
     def result(self):
@@ -164,9 +198,15 @@ class ResultProxy:
             if not self._resolved:
                 try:
                     self._status, self._value = self.receiver.recv()
-                    self._resolved = True
+                except Exception as exc:
+                    self._error = exc
+                    raise
                 finally:
+                    self._resolved = True
                     self.receiver.close()
+
+            if self._error is not None:
+                raise self._error
 
         return self._status, self._value
 

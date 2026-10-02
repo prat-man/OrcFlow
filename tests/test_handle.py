@@ -60,6 +60,18 @@ def test_result_proxy_is_not_done_before_reply():
     assert proxy.result() == 42
 
 
+def test_result_proxy_repeats_receive_error():
+    receiver, sender = Pipe(duplex=False)
+    sender.close()
+    proxy = ResultProxy(receiver)
+
+    with pytest.raises(EOFError):
+        proxy.result()
+
+    with pytest.raises(EOFError):
+        proxy.result()
+
+
 def test_handle_cancel_uses_control_callback():
     calls = []
     handle = make_handle(Status.FINISHED, 1, cancel=lambda: calls.append(True))
@@ -75,6 +87,33 @@ def test_group_results_preserve_submission_order():
     ])
     assert group.results() == [3, 1, 2]
     assert group.done()
+    assert group.results() == [3, 1, 2]
+
+
+def test_group_exception_is_repeatable():
+    group = GroupHandle([
+        make_handle(Status.FINISHED, 1),
+        make_handle(Status.FAILED, ValueError("boom")),
+    ])
+
+    first = group.exception()
+    second = group.exception()
+
+    assert isinstance(first, ValueError)
+    assert first is second
+
+
+def test_group_results_repeats_failure():
+    group = GroupHandle([
+        make_handle(Status.FINISHED, 1),
+        make_handle(Status.FAILED, ValueError("boom")),
+    ])
+
+    with pytest.raises(ValueError, match="boom"):
+        group.results()
+
+    with pytest.raises(ValueError, match="boom"):
+        group.results()
 
 
 def test_group_cancel_requests_every_member():
