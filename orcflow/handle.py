@@ -88,10 +88,11 @@ class GroupHandle:
 
     def _collect_exception(self):
         proxies = [handle._proxy for handle in self._handles]
-        pending = {proxy for proxy in proxies if not proxy.done()}
+        pending = set()
 
         for proxy in proxies:
             if not proxy.done():
+                pending.add(proxy)
                 continue
 
             try:

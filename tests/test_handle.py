@@ -103,6 +103,45 @@ def test_group_exception_is_repeatable():
     assert first is second
 
 
+@pytest.mark.parametrize("status", [Status.FINISHED, Status.CANCELLED])
+def test_group_exception_when_result_arrives_after_readiness_check(monkeypatch, status):
+    receiver, sender = Pipe(duplex=False)
+    proxy = ResultProxy(receiver)
+    group = GroupHandle([Handle(proxy, lambda: None)])
+    original_poll = receiver.poll
+
+    def poll_then_deliver_result(timeout=0.0):
+        ready = original_poll(timeout)
+        if not ready:
+            # Force completion just after the readiness check, without sleeps.
+            sender.send((status, 42 if status is Status.FINISHED else None))
+            sender.close()
+        return ready
+
+    try:
+        monkeypatch.setattr(receiver, "poll", poll_then_deliver_result)
+        assert group.exception() is None
+        assert group.exception() is None
+        if status is Status.FINISHED:
+            assert group.results() == [42]
+        else:
+            with pytest.raises(CancelledError):
+                group.results()
+    finally:
+        receiver.close()
+        sender.close()
+
+
+def test_group_exception_uses_results_already_consumed():
+    group = GroupHandle([
+        make_handle(Status.FINISHED, 42),
+        make_handle(Status.CANCELLED),
+    ])
+
+    assert group.exceptions() == []
+    assert group.exception() is None
+
+
 def test_group_results_repeats_failure():
     group = GroupHandle([
         make_handle(Status.FINISHED, 1),
