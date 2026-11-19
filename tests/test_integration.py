@@ -1,3 +1,4 @@
+import importlib
 import os
 import time
 from multiprocessing import Manager
@@ -353,3 +354,61 @@ def test_run_elapsed_comes_from_root_node_timing():
         assert tree.children[0].started is not None
         assert tree.children[0].finished is not None
         assert tree.children[0].elapsed() > 0
+
+
+def submit_from_helper():
+    progress(0.5)
+    return add.with_options(name="helper_add").submit(2, 3).result()
+
+
+@task
+def helper_parent():
+    return submit_from_helper()
+
+
+@flow
+def helper_flow():
+    return helper_parent.submit().result()
+
+
+def test_helpers_submit_under_current_task_and_report_its_progress():
+    with Runtime(n_workers=3) as runtime:
+        run = helper_flow.submit(runtime)
+        assert run.result() == 5
+        parent = run.tree().children[0]
+        assert parent.name == "helper_parent"
+        assert parent.progress == 0.5
+        assert [child.name for child in parent.children] == ["helper_add"]
+        assert parent.children[0].status is Status.FINISHED
+
+
+@flow
+def module_access_flow():
+    tasks = importlib.import_module(__name__)
+    tasks.progress(0.25)
+    return tasks.add.map([{"x": 1, "y": 2}, {"x": 3, "y": 4}]).results()
+
+
+def test_module_qualified_tasks_and_progress_are_supported():
+    with Runtime(n_workers=2) as runtime:
+        run = module_access_flow.submit(runtime)
+        assert run.result() == [3, 7]
+        tree = run.tree()
+        assert tree.progress == 0.25
+        assert [child.name for child in tree.children] == ["add(1, 2)", "add(3, 4)"]
+
+
+@flow
+def dynamically_defined_task_flow(offset):
+    @task
+    def local_child(x):
+        return x + offset
+
+    return local_child.submit(10).result()
+
+
+def test_task_defined_during_execution_is_supported():
+    with Runtime(n_workers=2) as runtime:
+        run = dynamically_defined_task_flow.submit(runtime, 5)
+        assert run.result() == 15
+        assert run.tree().children[0].name == "local_child"

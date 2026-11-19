@@ -6,10 +6,10 @@ import uuid
 from psutil import Process
 
 from orcflow import utils
+from orcflow.context import execution_context
 from orcflow.handle import Handle, ResultProxy
 from orcflow.serialization import deserialize_call, serialize_call
 from orcflow.types import Request, Status
-from orcflow.task import bind_tasks
 
 
 class Worker:
@@ -86,21 +86,21 @@ class Client:
 def execute(payload, client, node_id, name):
     """Deserialize and execute one flow or task inside a worker process."""
     fn, args, kwargs = deserialize_call(payload)
-    fn = bind_tasks(fn, client, node_id)
 
     client.set_running(node_id)
 
     if client.verbose:
         utils.log(Status.RUNNING, name, client)
 
-    try:
-        value = fn(*args, **kwargs)
-    except Exception:
+    with execution_context(client, node_id):
+        try:
+            value = fn(*args, **kwargs)
+        except Exception:
+            if client.verbose:
+                utils.log(Status.FAILED, name, client)
+            raise
+
         if client.verbose:
-            utils.log(Status.FAILED, name, client)
-        raise
+            utils.log(Status.FINISHED, name, client)
 
-    if client.verbose:
-        utils.log(Status.FINISHED, name, client)
-
-    return value
+        return value
