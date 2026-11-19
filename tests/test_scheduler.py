@@ -3,12 +3,13 @@ from multiprocessing import Pipe
 from queue import Queue
 
 import pytest
+from psutil import NoSuchProcess
 
 from orcflow.handle import ResultProxy
 from orcflow.node import Node, NodeType
 from orcflow.scheduler import Scheduler
 from orcflow.serialization import serialize_call
-from orcflow.types import Status
+from orcflow.types import Request, Status
 
 
 class FakeManager:
@@ -62,7 +63,7 @@ def queue_work(scheduler, runtime, name, tag=None):
     node = Node(name, NodeType.TASK)
     receiver, sender = Pipe(duplex=False)
     proxy = ResultProxy(receiver)
-    scheduler._queue(serialize_call(dummy, (), {}), node, sender, tag)
+    scheduler._queue(serialize_call(dummy, (), {}), node, None, sender, tag)
     return node, proxy
 
 
@@ -188,8 +189,8 @@ def test_cancellation_propagates_to_unfinished_descendants():
     child2 = parent.add("child2", NodeType.TASK)
     receiver1, sender1 = Pipe(duplex=False)
     receiver2, sender2 = Pipe(duplex=False)
-    scheduler._queue(serialize_call(dummy, (), {}), child1, sender1, "cpu")
-    scheduler._queue(serialize_call(dummy, (), {}), child2, sender2, "cpu")
+    scheduler._queue(serialize_call(dummy, (), {}), child1, parent, sender1, "cpu")
+    scheduler._queue(serialize_call(dummy, (), {}), child2, parent, sender2, "cpu")
 
     scheduler._cancel(parent)
 
@@ -268,3 +269,72 @@ def test_cancel_is_idempotent_for_running_work():
     scheduler._cancel(node)
 
     assert node.status is Status.CANCELLED
+
+
+def test_missing_worker_does_not_stop_message_processing(monkeypatch):
+    scheduler, runtime = make_scheduler()
+    node = Node("task", NodeType.TASK)
+    node.status = Status.QUEUED
+    runtime.nodes[node.id] = node
+
+    def missing_worker(pid):
+        raise NoSuchProcess(pid)
+
+    monkeypatch.setattr("orcflow.scheduler.Worker", missing_worker)
+    scheduler.requests.put((Status.RUNNING, node.id, 123))
+    scheduler.requests.put((Request.PROGRESS, node.id, 0.5))
+    scheduler.requests.put((Request.STOP,))
+
+    scheduler._run()
+
+    assert node.progress == 0.5
+    assert runtime.registry == {}
+
+
+@pytest.mark.parametrize("parent_status", [
+    Status.CANCELLED, Status.FAILED, Status.FINISHED,
+])
+def test_late_child_of_ended_parent_is_cancelled(parent_status):
+    scheduler, runtime = make_scheduler({"cpu": 1})
+    parent = Node("parent", NodeType.TASK)
+    parent.status = parent_status
+    runtime.nodes[parent.id] = parent
+    receiver, sender = Pipe(duplex=False)
+    proxy = ResultProxy(receiver)
+    try:
+        scheduler.requests.put((
+            Request.SUBMIT, serialize_call(dummy, (), {}), "child", parent.id,
+            "child", "cpu", None, sender,
+        ))
+        scheduler.requests.put((Request.STOP,))
+        scheduler._run()
+
+        assert runtime.pool.calls == []
+        assert scheduler.pending == []
+        assert scheduler.running == {}
+        child = runtime.nodes["child"]
+        assert parent.children == [child]
+        assert child.status is Status.CANCELLED
+        assert child.started is None
+        assert child.finished is not None
+        assert proxy.done()
+        with pytest.raises(CancelledError):
+            proxy.result()
+    finally:
+        receiver.close()
+        sender.close()
+
+
+def test_direct_submission_under_cancelled_parent_is_cancelled():
+    scheduler, runtime = make_scheduler()
+    parent = Node("parent", NodeType.TASK)
+    parent.status = Status.CANCELLED
+    runtime.nodes[parent.id] = parent
+
+    handle = scheduler.submit(dummy, parent=parent.id, name="child")
+
+    assert runtime.pool.calls == []
+    assert parent.children[0].status is Status.CANCELLED
+    assert handle.done()
+    with pytest.raises(CancelledError):
+        handle.result()

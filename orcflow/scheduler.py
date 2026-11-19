@@ -4,6 +4,8 @@ from threading import RLock, Thread
 
 from multiprocessing import Pipe
 
+from psutil import NoSuchProcess
+
 from orcflow import utils
 from orcflow.node import NodeType
 from orcflow.types import Request, Status
@@ -53,18 +55,19 @@ class Scheduler:
 
     def submit(self, fn, *args, node=None, parent=None, name=None, tag=None, timeout=None, **kwargs):
         """Accept a flow or task for execution."""
+        parent = self.runtime.nodes[parent] if parent is not None else None
         if node is None:
-            node = self.runtime.nodes[parent].add(name, NodeType.TASK)
+            node = parent.add(name, NodeType.TASK)
 
         # Serialize the callable and arguments before crossing the process boundary.
         payload = serialize_call(fn, args, kwargs)
 
         # Every submission receives its result through the same reply channel.
         receiver, sender = Pipe(duplex=False)
-        self._queue(payload, node, sender, tag, timeout)
+        self._queue(payload, node, parent, sender, tag, timeout)
         return Handle(ResultProxy(receiver), lambda: self._cancel(node))
 
-    def _queue(self, payload, node, reply, tag=None, timeout=None):
+    def _queue(self, payload, node, parent, reply, tag=None, timeout=None):
         """Queue work until its concurrency limit allows it to run."""
         with self.lock:
             self.runtime.nodes[node.id] = node
@@ -74,9 +77,16 @@ class Scheduler:
                 utils.log(Status.QUEUED, node.name, self.runtime)
 
             work = payload, node, reply, tag, timeout
-
             self.pending.append(work)
-            self._schedule_pending()
+
+            if parent is not None and parent.status in {
+                Status.CANCELLED,
+                Status.FAILED,
+                Status.FINISHED,
+            }:
+                self._cancel(node)
+            else:
+                self._schedule_pending()
 
     def _can_schedule(self, tag):
         """Return whether a tag currently has capacity."""
@@ -243,7 +253,11 @@ class Scheduler:
 
                 with self.lock:
                     node = self.runtime.nodes[node_id]
-                    worker = self.runtime.registry.setdefault(pid, Worker(pid))
+                    try:
+                        worker = self.runtime.registry.setdefault(pid, Worker(pid))
+                    except NoSuchProcess:
+                        # The worker may exit before its start message is handled.
+                        continue
 
                     if node.status is Status.QUEUED:
                         node.status = Status.RUNNING
@@ -257,7 +271,7 @@ class Scheduler:
                 parent = self.runtime.nodes[parent_id]
                 node = parent.add(name, NodeType.TASK, node_id)
 
-                self._queue(payload, node, reply, tag, timeout)
+                self._queue(payload, node, parent, reply, tag, timeout)
 
             elif kind == Request.CANCEL:
                 _, node_id = message
