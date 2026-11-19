@@ -1,8 +1,10 @@
-from concurrent.futures import CancelledError
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from multiprocessing import Pipe
+from threading import Event
 
 import pytest
 
+from orcflow import handle as handle_module
 from orcflow.handle import GroupHandle, Handle, ResultProxy
 from orcflow.types import Status
 
@@ -58,6 +60,38 @@ def test_result_proxy_is_not_done_before_reply():
 
     assert proxy.done()
     assert proxy.result() == 42
+
+
+@pytest.mark.parametrize("method", ["result", "exception"])
+def test_done_does_not_wait_for_concurrent_result_reader(monkeypatch, method):
+    receiver, sender = Pipe(duplex=False)
+    handle = Handle(ResultProxy(receiver), lambda: None)
+    receiving = Event()
+    original_recv = receiver.recv
+
+    def recv():
+        receiving.set()
+        return original_recv()
+
+    monkeypatch.setattr(receiver, "recv", recv)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            reader = executor.submit(getattr(handle, method))
+            try:
+                assert receiving.wait(5), "Reader did not reach recv()"
+                # No result is sent until this readiness check has returned.
+                assert executor.submit(handle.done).result(timeout=5) is False
+            finally:
+                sender.send((Status.FINISHED, 42))
+                sender.close()
+
+            assert reader.result(timeout=5) == (42 if method == "result" else None)
+
+        assert handle.done()
+        assert handle.result() == 42
+    finally:
+        receiver.close()
+        sender.close()
 
 
 def test_result_proxy_repeats_receive_error():
@@ -160,3 +194,79 @@ def test_group_cancel_requests_every_member():
     handles = [make_handle(Status.FINISHED, i, cancel=lambda i=i: calls.append(i)) for i in range(3)]
     GroupHandle(handles).cancel()
     assert calls == [0, 1, 2]
+
+
+@pytest.mark.parametrize("method", ["results", "exception"])
+def test_group_exceptions_does_not_close_pipe_during_another_group_wait(monkeypatch, method):
+    receiver, sender = Pipe(duplex=False)
+    group = GroupHandle([Handle(ResultProxy(receiver), lambda: None)])
+    waiting, resume_wait, exceptions_finished = Event(), Event(), Event()
+
+    original_wait = handle_module.wait
+
+    def delayed_wait(proxies):
+        waiting.set()
+        assert resume_wait.wait(5), "Group wait was not released"
+        return original_wait(proxies)
+
+    def collect_exceptions():
+        try:
+            return group.exceptions()
+        finally:
+            exceptions_finished.set()
+
+    monkeypatch.setattr(handle_module, "wait", delayed_wait)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(getattr(group, method))
+            try:
+                assert waiting.wait(5), "First group call did not reach wait()"
+                second = executor.submit(collect_exceptions)
+                sender.send((Status.FINISHED, 42))
+                sender.close()
+                # Give exceptions() a chance to consume the result before
+                # the first call resumes. It must wait for the group lock.
+                exceptions_finished.wait(1)
+            finally:
+                if not sender.closed:
+                    sender.send((Status.FINISHED, 42))
+                    sender.close()
+                resume_wait.set()
+
+            assert first.result(timeout=5) == ([42] if method == "results" else None)
+            assert second.result(timeout=5) == []
+    finally:
+        receiver.close()
+        sender.close()
+
+
+def test_group_done_and_cancel_work_while_exceptions_waits(monkeypatch):
+    receiver, sender = Pipe(duplex=False)
+    receiving = Event()
+    original_recv = receiver.recv
+
+    def recv():
+        receiving.set()
+        return original_recv()
+
+    def cancel():
+        sender.send((Status.CANCELLED, None))
+        sender.close()
+
+    monkeypatch.setattr(receiver, "recv", recv)
+    group = GroupHandle([Handle(ResultProxy(receiver), cancel)])
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            reader = executor.submit(group.exceptions)
+            try:
+                assert receiving.wait(5), "exceptions() did not reach recv()"
+                assert executor.submit(group.done).result(timeout=5) is False
+                executor.submit(group.cancel).result(timeout=5)
+            finally:
+                if not sender.closed:
+                    cancel()
+            assert reader.result(timeout=5) == []
+        assert group.done()
+    finally:
+        receiver.close()
+        sender.close()

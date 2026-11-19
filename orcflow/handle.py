@@ -119,18 +119,19 @@ class GroupHandle:
 
     def exceptions(self):
         """Wait for all results to complete and return the exceptions raised by any that failed, ignoring cancellations."""
-        exceptions = []
+        with self._lock:
+            exceptions = []
 
-        for handle in self._handles:
-            try:
-                exception = handle.exception()
-            except CancelledError:
-                continue
+            for handle in self._handles:
+                try:
+                    exception = handle.exception()
+                except CancelledError:
+                    continue
 
-            if exception is not None:
-                exceptions.append(exception)
+                if exception is not None:
+                    exceptions.append(exception)
 
-        return exceptions
+            return exceptions
 
 
 class Run(Handle):
@@ -165,6 +166,8 @@ class ResultProxy:
         self._value = None
         self._error = None
         self._lock = Lock()
+        # Polling and closing share a short lock, separate from blocking reads.
+        self._state_lock = Lock()
 
     def result(self):
         """Wait for and return the execution result."""
@@ -179,7 +182,7 @@ class ResultProxy:
 
     def done(self):
         """Return whether a reply has arrived."""
-        with self._lock:
+        with self._state_lock:
             return self._resolved or self.receiver.poll()
 
     def exception(self):
@@ -203,8 +206,9 @@ class ResultProxy:
                     self._error = exc
                     raise
                 finally:
-                    self._resolved = True
-                    self.receiver.close()
+                    with self._state_lock:
+                        self._resolved = True
+                        self.receiver.close()
 
             if self._error is not None:
                 raise self._error
