@@ -248,7 +248,7 @@ def test_workers_report_resource_usage():
         run = capacity_flow.submit(runtime)
 
         def has_active_worker():
-            return any(worker.node is not None for worker in runtime.workers())
+            return any(worker.node is not None for worker in runtime.workers(interval=0.05))
 
         deadline = time.monotonic() + 3
         found = False
@@ -261,13 +261,15 @@ def test_workers_report_resource_usage():
 
         assert found
 
-        active = [worker for worker in runtime.workers() if worker.node is not None]
+        active = [worker for worker in runtime.workers(interval=0.05) if worker.node is not None]
+        assert active
 
         for worker in active:
             assert worker.pid > 0
-            assert worker.memory() > 0
-            assert worker.threads() >= 1
-            assert worker.cpu_percent() >= 0
+            assert worker.memory > 0
+            assert worker.threads >= 1
+            assert worker.cpu_percent >= 0
+            assert worker.interval >= 0.05
 
         run.result()
 

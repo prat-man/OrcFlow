@@ -1,12 +1,15 @@
-from copy import deepcopy
 import math
 from multiprocessing import Manager, get_context
+from numbers import Real
+import time
 
 from bunch_py3 import Bunch
 from coolname import generate_slug
 from pebble import ProcessPool
+from psutil import NoSuchProcess
 
 from orcflow import utils
+from orcflow.monitoring import NodeInfo, WorkerInfo
 from orcflow.scheduler import Scheduler
 from orcflow.types import Status
 
@@ -65,10 +68,80 @@ class Runtime:
         if self.verbose:
             utils.log(Status.SHUTDOWN, None, self)
 
-    def workers(self):
-        """Return a snapshot of the current pool workers."""
+    def workers(self, *, interval=0.2):
+        """Return immutable worker snapshots after one shared CPU sampling wait.
+
+        interval must be a finite positive number of seconds. CPU usage
+        is measured over the actual elapsed interval, independently of previous
+        calls. Workers that leave the runtime during sampling are omitted;
+        workers that start during sampling are included on the next call.
+        """
+        if (
+            isinstance(interval, bool)
+            or not isinstance(interval, Real)
+            or not math.isfinite(interval)
+            or interval <= 0
+        ):
+            raise ValueError("interval must be a finite positive number of seconds")
+
         with self.scheduler.lock:
-            return [deepcopy(worker) for worker in self.registry.values()]
+            workers = list(self.registry.values())
+
+        starts = []
+        for worker in workers:
+            try:
+                started = time.perf_counter()
+                starts.append((worker, worker.cpu_time(), started))
+            except NoSuchProcess:
+                continue
+
+        if not starts:
+            return []
+
+        # Sample every process over the same wait without holding scheduler state.
+        time.sleep(interval)
+
+        snapshots = []
+        for worker, cpu_start, started in starts:
+            try:
+                cpu_end = worker.cpu_time()
+                elapsed = time.perf_counter() - started
+                sampled_at = time.time()
+                cpu_num = worker.cpu_num()
+                memory = worker.memory()
+                threads = worker.threads()
+            except NoSuchProcess:
+                continue
+
+            with self.scheduler.lock:
+                current = self.registry.get(worker.pid)
+                if current is None or current._process != worker._process:
+                    continue
+                node = current.node
+                node_info = None if node is None else NodeInfo(
+                    id=node.id,
+                    name=node.name,
+                    type=node.type,
+                    status=node.status,
+                    progress=node.progress,
+                )
+
+            cpu_percent = (
+                max(0.0, cpu_end - cpu_start) / elapsed * 100.0
+                if elapsed > 0 else 0.0
+            )
+            snapshots.append(WorkerInfo(
+                pid=worker.pid,
+                node=node_info,
+                cpu_num=cpu_num,
+                cpu_percent=cpu_percent,
+                memory=memory,
+                threads=threads,
+                interval=elapsed,
+                sampled_at=sampled_at,
+            ))
+
+        return snapshots
 
     def capacity(self):
         """Return the current worker and tag capacity."""
@@ -126,11 +199,11 @@ class Runtime:
 
             return counts
 
-    def print(self):
+    def print(self, *, interval=0.2):
         """Print detailed information about the current runtime."""
+        workers = self.workers(interval=interval)
         counts = self.counts()
         capacity = self.capacity()
-        workers = self.workers()
 
         pid_width = 8
         node_width = 20
@@ -201,12 +274,12 @@ class Runtime:
                     else f"{math.floor(worker.node.progress * 100)}%"
                 )
 
-                cpu_num = worker.cpu_num()
+                cpu_num = worker.cpu_num
                 cpu_num = "-" if cpu_num is None else str(cpu_num)
 
-                cpu_percent = f"{worker.cpu_percent():.1f}%"
-                memory = f"{worker.memory() / 1024**2:.1f} MB"
-                threads = str(worker.threads())
+                cpu_percent = f"{worker.cpu_percent:.1f}%"
+                memory = f"{worker.memory / 1024**2:.1f} MB"
+                threads = str(worker.threads)
 
                 row(
                     f"{table_indent}"

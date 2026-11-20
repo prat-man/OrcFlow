@@ -1,4 +1,3 @@
-from copy import deepcopy
 import os
 from multiprocessing import Pipe
 import uuid
@@ -13,7 +12,7 @@ from orcflow.types import Request, Status
 
 
 class Worker:
-    """Represent a pool worker process."""
+    """Internal scheduler state and live monitoring for a pool worker process."""
 
     def __init__(self, pid):
         self.pid = pid
@@ -22,11 +21,10 @@ class Worker:
         self._process = Process(self.pid)
         self.cpu_percent()
 
-    def __deepcopy__(self, memo):
-        worker = Worker(self.pid)
-        memo[id(self)] = worker
-        worker.node = deepcopy(self.node, memo)
-        return worker
+    def cpu_time(self):
+        """Return accumulated user and system CPU time in seconds."""
+        times = self._process.cpu_times()
+        return times.user + times.system
 
     def cpu_num(self):
         """Return the current logical CPU number, if available."""
