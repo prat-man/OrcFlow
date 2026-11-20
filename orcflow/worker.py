@@ -53,7 +53,7 @@ class Client:
         self.verbose = verbose
         self.requests = requests
 
-    def submit(self, fn, *args, parent=None, name=None, tag=None, timeout=None, **kwargs):
+    def submit(self, fn, args, kwargs, *, parent=None, name=None, tag=None, timeout=None):
         """Ask the parent scheduler to run a nested task."""
         payload = serialize_call(fn, args, kwargs)
 

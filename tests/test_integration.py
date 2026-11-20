@@ -89,7 +89,7 @@ def cancel_flow():
 
 def test_basic_flow_end_to_end():
     with Runtime(n_workers=2) as runtime:
-        run = basic_flow.submit(runtime)
+        run = basic_flow.bind(runtime).submit()
         assert run.result() == 5
         assert run.done()
         assert run.status() is Status.FINISHED
@@ -97,7 +97,7 @@ def test_basic_flow_end_to_end():
 
 def test_nested_map_preserves_submission_order():
     with Runtime(n_workers=4) as runtime:
-        run = nested_flow.submit(runtime)
+        run = nested_flow.bind(runtime).submit()
         assert run.result() == [3, 7, 11]
         tree = run.tree()
         assert tree.status is Status.FINISHED
@@ -107,7 +107,7 @@ def test_nested_map_preserves_submission_order():
 
 def test_failure_propagates_to_flow():
     with Runtime(n_workers=2) as runtime:
-        run = failure_flow.submit(runtime)
+        run = failure_flow.bind(runtime).submit()
         with pytest.raises(ValueError, match="expected failure"):
             run.result()
         assert run.status() is Status.FAILED
@@ -115,7 +115,7 @@ def test_failure_propagates_to_flow():
 
 def test_progress_reaches_tree():
     with Runtime(n_workers=2) as runtime:
-        run = progress_flow.submit(runtime)
+        run = progress_flow.bind(runtime).submit()
 
         deadline = time.monotonic() + 5
         observed = False
@@ -133,7 +133,7 @@ def test_progress_reaches_tree():
 
 def test_group_cancellation_is_not_failure():
     with Runtime(n_workers=4, concurrency={"serial": 1}) as runtime:
-        run = cancel_flow.submit(runtime)
+        run = cancel_flow.bind(runtime).submit()
 
         assert run.result() == "parent finished"
 
@@ -159,7 +159,7 @@ def timeout_flow():
 
 def test_task_timeout_fails_the_task():
     with Runtime(n_workers=2) as runtime:
-        run = timeout_flow.submit(runtime)
+        run = timeout_flow.bind(runtime).submit()
 
         with pytest.raises(Exception):
             run.result()
@@ -192,7 +192,7 @@ def test_initializer_runs_in_worker_processes(manager):
         initializer=record_worker_start,
         initargs=(init_log,),
     ) as runtime:
-        run = init_flow.submit(runtime, marker)
+        run = init_flow.bind(runtime).submit(marker)
         run.result()
 
     assert 1 <= len(init_log) <= 2
@@ -213,7 +213,7 @@ def capacity_flow():
 
 def test_capacity_and_counts_reflect_tag_limit():
     with Runtime(n_workers=2, concurrency={"limited": 1}) as runtime:
-        run = capacity_flow.submit(runtime)
+        run = capacity_flow.bind(runtime).submit()
 
         deadline = time.monotonic() + 3
         used_one = False
@@ -245,7 +245,7 @@ def test_capacity_and_counts_reflect_tag_limit():
 
 def test_workers_report_resource_usage():
     with Runtime(n_workers=2, concurrency={"limited": 1}) as runtime:
-        run = capacity_flow.submit(runtime)
+        run = capacity_flow.bind(runtime).submit()
 
         def has_active_worker():
             return any(worker.node is not None for worker in runtime.workers(interval=0.05))
@@ -303,7 +303,7 @@ def group_failure_flow(values):
 
 def test_group_handle_partial_failure_reporting():
     with Runtime(n_workers=4) as runtime:
-        run = group_failure_flow.submit(runtime, [1, 2, 3, 4])
+        run = group_failure_flow.bind(runtime).submit([1, 2, 3, 4])
         info = run.result()
 
     assert info["exception_type"] == "ValueError"
@@ -325,7 +325,7 @@ def make_closure_flow(n):
 
 def test_local_flow_and_task_closures_are_supported():
     with Runtime(n_workers=3) as runtime:
-        run = make_closure_flow(5).submit(runtime)
+        run = make_closure_flow(5).bind(runtime).submit()
         assert run.result() == 15
         assert run.status() is Status.FINISHED
 
@@ -343,7 +343,7 @@ def timed_flow():
 
 def test_run_elapsed_comes_from_root_node_timing():
     with Runtime(n_workers=2) as runtime:
-        run = timed_flow.submit(runtime)
+        run = timed_flow.bind(runtime).submit()
 
         assert run.result() == "done"
 
@@ -376,7 +376,7 @@ def helper_flow():
 
 def test_helpers_submit_under_current_task_and_report_its_progress():
     with Runtime(n_workers=3) as runtime:
-        run = helper_flow.submit(runtime)
+        run = helper_flow.bind(runtime).submit()
         assert run.result() == 5
         parent = run.tree().children[0]
         assert parent.name == "helper_parent"
@@ -394,7 +394,7 @@ def module_access_flow():
 
 def test_module_qualified_tasks_and_progress_are_supported():
     with Runtime(n_workers=2) as runtime:
-        run = module_access_flow.submit(runtime)
+        run = module_access_flow.bind(runtime).submit()
         assert run.result() == [3, 7]
         tree = run.tree()
         assert tree.progress == 0.25
@@ -412,6 +412,6 @@ def dynamically_defined_task_flow(offset):
 
 def test_task_defined_during_execution_is_supported():
     with Runtime(n_workers=2) as runtime:
-        run = dynamically_defined_task_flow.submit(runtime, 5)
+        run = dynamically_defined_task_flow.bind(runtime).submit(5)
         assert run.result() == 15
         assert run.tree().children[0].name == "local_child"

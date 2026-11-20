@@ -53,14 +53,14 @@ class Scheduler:
 
             time.sleep(0.01)
 
-    def submit(self, fn, *args, node=None, parent=None, name=None, tag=None, timeout=None, **kwargs):
+    def submit(self, fn, args=(), kwargs=None, *, node=None, parent=None, name=None, tag=None, timeout=None):
         """Accept a flow or task for execution."""
         parent = self.runtime.nodes[parent] if parent is not None else None
         if node is None:
             node = parent.add(name, NodeType.TASK)
 
         # Serialize the callable and arguments before crossing the process boundary.
-        payload = serialize_call(fn, args, kwargs)
+        payload = serialize_call(fn, args, {} if kwargs is None else kwargs)
 
         # Every submission receives its result through the same reply channel.
         receiver, sender = Pipe(duplex=False)

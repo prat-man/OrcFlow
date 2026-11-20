@@ -11,16 +11,28 @@ class Flow:
         self.fn = fn
         self.name = name or fn.__name__
         self.timeout = timeout
+        self._runtime = None
 
     def with_options(self, *, name=None, timeout=None):
         """Return a copy of this flow with updated options."""
-        return Flow(
+        configured = Flow(
             self.fn,
             name=self.name if name is None else name,
             timeout=self.timeout if timeout is None else timeout,
         )
+        configured._runtime = self._runtime
+        return configured
 
-    def get_name(self, *args, **kwargs):
+    def bind(self, runtime):
+        """Return a copy bound to a runtime, leaving this flow unchanged.
+
+        Flow-function arguments are supplied to submit(), not to bind().
+        """
+        bound = self.with_options()
+        bound._runtime = runtime
+        return bound
+
+    def get_name(self, /, *args, **kwargs):
         """Resolve the display name for this flow call."""
         if callable(self.name):
             return self.name(*args, **kwargs)
@@ -30,8 +42,15 @@ class Flow:
 
         return self.name.format(**parameters.arguments)
 
-    def submit(self, runtime, *args, **kwargs):
-        """Start a new run of the flow against an existing runtime."""
+    def submit(self, /, *args, **kwargs):
+        """Start a run on the bound runtime using only function arguments."""
+        runtime = self._runtime
+        if runtime is None:
+            raise RuntimeError(
+                f"Flow {self.name!r} is not bound to a Runtime. "
+                "Call .bind(runtime) before submitting."
+            )
+
         root = Node(
             name=self.get_name(*args, **kwargs),
             type=NodeType.FLOW,
@@ -39,10 +58,10 @@ class Flow:
 
         handle = runtime.submit(
             self.fn,
-            *args,
+            args,
+            kwargs,
             node=root,
             timeout=self.timeout,
-            **kwargs,
         )
 
         return Run(handle, runtime, root)
@@ -50,7 +69,7 @@ class Flow:
     def __call__(self, *args, **kwargs):
         raise TypeError(
             f"Flow {self.name!r} cannot be called directly. "
-            "Use .submit(runtime, ...) instead."
+            "Use .bind(runtime).submit(...) instead."
         )
 
 

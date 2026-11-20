@@ -74,6 +74,8 @@ def test_reused_worker_routes_helper_calls_to_current_client_and_parent():
     for client, parent in [(first_client, "first"), (second_client, "second")]:
         client.submit.assert_called_once_with(
             ANY,
+            (),
+            {},
             parent=parent,
             name="outside_task",
             tag=None,

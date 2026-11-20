@@ -48,9 +48,9 @@ class Runtime:
     def __exit__(self, *exc):
         self.shutdown()
 
-    def submit(self, fn, *args, node=None, parent=None, name=None, tag=None, timeout=None, **kwargs):
-        """Submit work through this runtime's scheduler."""
-        return self.scheduler.submit(fn, *args, node=node, parent=parent, name=name, tag=tag, timeout=timeout, **kwargs)
+    def submit(self, fn, args, kwargs, *, node=None, parent=None, name=None, tag=None, timeout=None):
+        """Keep function arguments separate from scheduling options."""
+        return self.scheduler.submit(fn, args, kwargs, node=node, parent=parent, name=name, tag=tag, timeout=timeout)
 
     def shutdown(self):
         """Finish outstanding work and release runtime resources."""

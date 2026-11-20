@@ -22,7 +22,7 @@ class Task:
             timeout=self.timeout if timeout is None else timeout,
         )
 
-    def get_name(self, *args, **kwargs):
+    def get_name(self, /, *args, **kwargs):
         """Resolve the display name for this task call."""
         if callable(self.name):
             return self.name(*args, **kwargs)
@@ -32,18 +32,18 @@ class Task:
 
         return self.name.format(**parameters.arguments)
 
-    def submit(self, *args, **kwargs):
+    def submit(self, /, *args, **kwargs):
         """Submit this task under the currently executing flow or task."""
         client, parent = current_execution()
         name = self.get_name(*args, **kwargs)
         return client.submit(
             self.fn,
-            *args,
+            args,
+            kwargs,
             parent=parent,
             name=name,
             tag=self.tag,
             timeout=self.timeout,
-            **kwargs,
         )
 
     def map(self, arguments):
