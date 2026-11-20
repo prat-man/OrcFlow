@@ -1,6 +1,12 @@
 import pytest
 
+from orcflow import flow
 from orcflow.runtime import Runtime
+
+
+@flow
+def answer():
+    return 42
 
 
 class FakePool:
@@ -54,16 +60,29 @@ def test_valid_concurrency_limit_is_accepted():
         runtime.shutdown()
 
 
-def test_capacity_accepts_default_worker_count():
-    runtime = Runtime()
-    try:
+@pytest.mark.parametrize("cpu_count, expected", [(2, 2), (None, 1)])
+def test_default_worker_count_can_execute_flow(monkeypatch, cpu_count, expected):
+    monkeypatch.setattr("orcflow.runtime.os.cpu_count", lambda: cpu_count)
+
+    with Runtime() as runtime:
         capacity = runtime.capacity()
 
-        assert capacity.workers.total is None
+        assert runtime.n_workers == expected
+        assert capacity.workers.total == expected
         assert capacity.workers.used == 0
-        assert capacity.workers.free is None
-    finally:
-        runtime.shutdown()
+        assert capacity.workers.free == expected
+        assert answer.bind(runtime).submit().result() == 42
+
+
+@pytest.mark.parametrize("n_workers", [0, -1, True, False, 1.5, "2"])
+def test_invalid_worker_count_is_rejected_before_creating_resources(monkeypatch, n_workers):
+    def unexpected_manager():
+        pytest.fail("Worker count must be validated before creating resources")
+
+    monkeypatch.setattr("orcflow.runtime.Manager", unexpected_manager)
+
+    with pytest.raises(ValueError, match="n_workers must be a positive integer"):
+        Runtime(n_workers=n_workers)
 
 
 def test_shutdown_is_idempotent_and_waits_before_closing_pool():

@@ -1,4 +1,5 @@
 import math
+import os
 from multiprocessing import Manager, get_context
 from numbers import Real
 import time
@@ -18,6 +19,11 @@ class Runtime:
     """Own the process pool and execution state for one or more flow runs."""
 
     def __init__(self, n_workers=None, concurrency=None, initializer=None, initargs=(), verbose=False):
+        if n_workers is None:
+            n_workers = os.cpu_count() or 1
+        if not isinstance(n_workers, int) or isinstance(n_workers, bool) or n_workers < 1:
+            raise ValueError("n_workers must be a positive integer")
+
         self.id = generate_slug(2)
         self.verbose = verbose
         self.concurrency = concurrency or {}
@@ -162,7 +168,7 @@ class Runtime:
                 )
 
             workers_total = self.n_workers
-            workers_free = None if workers_total is None else workers_total - workers_used
+            workers_free = workers_total - workers_used
 
             return Bunch(
                 workers=Bunch(
