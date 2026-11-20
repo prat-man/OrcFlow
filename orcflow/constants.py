@@ -1,5 +1,8 @@
 ORCFLOW_PREFIX = "[orcflow]"
 
+# Distinguish an omitted option from an explicit None.
+_UNSET = object()
+
 COLOR_RESET = "\033[0m"
 COLOR_YELLOW = "\033[93m"
 COLOR_BLUE = "\033[94m"

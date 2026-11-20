@@ -1,5 +1,6 @@
 from inspect import signature
 
+from orcflow.constants import _UNSET
 from orcflow.node import Node, NodeType
 from orcflow.handle import Run
 
@@ -13,12 +14,12 @@ class Flow:
         self.timeout = timeout
         self._runtime = None
 
-    def with_options(self, *, name=None, timeout=None):
-        """Return a copy of this flow with updated options."""
+    def with_options(self, *, name=_UNSET, timeout=_UNSET):
+        """Return a copy, preserving omitted options and resetting explicit None."""
         configured = Flow(
             self.fn,
-            name=self.name if name is None else name,
-            timeout=self.timeout if timeout is None else timeout,
+            name=self.name if name is _UNSET else name,
+            timeout=self.timeout if timeout is _UNSET else timeout,
         )
         configured._runtime = self._runtime
         return configured

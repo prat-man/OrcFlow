@@ -1,5 +1,6 @@
 from inspect import signature
 
+from orcflow.constants import _UNSET
 from orcflow.context import current_execution
 from orcflow.handle import GroupHandle
 
@@ -13,13 +14,13 @@ class Task:
         self.tag = tag
         self.timeout = timeout
 
-    def with_options(self, *, name=None, tag=None, timeout=None):
-        """Return a copy of this task with updated options."""
+    def with_options(self, *, name=_UNSET, tag=_UNSET, timeout=_UNSET):
+        """Return a copy, preserving omitted options and resetting explicit None."""
         return Task(
             self.fn,
-            name=self.name if name is None else name,
-            tag=self.tag if tag is None else tag,
-            timeout=self.timeout if timeout is None else timeout,
+            name=self.name if name is _UNSET else name,
+            tag=self.tag if tag is _UNSET else tag,
+            timeout=self.timeout if timeout is _UNSET else timeout,
         )
 
     def get_name(self, /, *args, **kwargs):
