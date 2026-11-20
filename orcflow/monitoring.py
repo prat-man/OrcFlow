@@ -22,7 +22,7 @@ class WorkerInfo:
     """Captured worker metrics; memory is in bytes and times are in seconds.
 
     CPU usage covers interval and may exceed 100% for multithreaded
-    processes. sampled_at is the Unix timestamp at the end of CPU sampling.
+    processes. timestamp is the Unix timestamp at the end of CPU sampling.
     """
 
     pid: int
@@ -32,4 +32,4 @@ class WorkerInfo:
     memory: int
     threads: int
     interval: float
-    sampled_at: float
+    timestamp: float

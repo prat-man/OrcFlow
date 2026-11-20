@@ -65,9 +65,11 @@ def add_worker(runtime, monkeypatch, pid=123, cpu_times=(10.0, 10.2)):
     return worker, process
 
 
-def test_workers_share_one_sampling_wait_and_use_actual_elapsed_time(sampling_runtime, monkeypatch):
+@pytest.mark.parametrize("extra_wait", [-0.0002, 0.05])
+def test_workers_share_one_sampling_wait_and_use_actual_elapsed_time(sampling_runtime, monkeypatch, extra_wait):
     runtime, clock = sampling_runtime
-    clock.extra_wait = 0.05
+    clock.extra_wait = extra_wait
+    elapsed = 0.2 + extra_wait
     for pid in range(1, 11):
         add_worker(runtime, monkeypatch, pid, cpu_times=(10.0, 10.5))
 
@@ -77,9 +79,9 @@ def test_workers_share_one_sampling_wait_and_use_actual_elapsed_time(sampling_ru
     assert clock.waits == [0.2]
     for info in snapshots:
         assert isinstance(info, WorkerInfo)
-        assert info.cpu_percent == pytest.approx(200.0)
-        assert info.interval == pytest.approx(0.25)
-        assert info.sampled_at == clock.time()
+        assert info.cpu_percent == pytest.approx(0.5 / elapsed * 100)
+        assert info.interval == pytest.approx(elapsed)
+        assert info.timestamp == clock.time()
         assert info.memory == 64 * 1024**2
         assert info.threads == 4
         assert info.cpu_num == 2

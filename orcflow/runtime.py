@@ -106,7 +106,7 @@ class Runtime:
             try:
                 cpu_end = worker.cpu_time()
                 elapsed = time.perf_counter() - started
-                sampled_at = time.time()
+                timestamp = time.time()
                 cpu_num = worker.cpu_num()
                 memory = worker.memory()
                 threads = worker.threads()
@@ -138,7 +138,7 @@ class Runtime:
                 memory=memory,
                 threads=threads,
                 interval=elapsed,
-                sampled_at=sampled_at,
+                timestamp=timestamp,
             ))
 
         return snapshots

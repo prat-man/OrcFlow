@@ -269,7 +269,8 @@ def test_workers_report_resource_usage():
             assert worker.memory > 0
             assert worker.threads >= 1
             assert worker.cpu_percent >= 0
-            assert worker.interval >= 0.05
+            # This records measured elapsed time, not the requested duration.
+            assert worker.interval > 0
 
         run.result()
 
