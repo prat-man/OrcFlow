@@ -189,6 +189,34 @@ def test_group_results_repeats_failure():
         group.results()
 
 
+@pytest.mark.parametrize("ready_first", [False, True])
+@pytest.mark.parametrize("status", [Status.FAILED, Status.CANCELLED])
+def test_group_results_reports_ready_error_without_waiting(status, ready_first):
+    receiver, sender = Pipe(duplex=False)
+    unfinished = Handle(ResultProxy(receiver), lambda: None)
+    ready = make_handle(status, ValueError("boom") if status is Status.FAILED else None)
+    group = GroupHandle([ready, unfinished] if ready_first else [unfinished, ready])
+    expected = ValueError if status is Status.FAILED else CancelledError
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result = executor.submit(group.results)
+            try:
+                with pytest.raises(expected):
+                    result.result(timeout=2)
+                assert not unfinished.done()
+                # Repeated calls must still raise without waiting for siblings.
+                with pytest.raises(expected):
+                    group.results()
+            finally:
+                # Release the unfinished result if the regression returns.
+                sender.send((Status.FINISHED, 42))
+                sender.close()
+    finally:
+        receiver.close()
+        sender.close()
+
+
 def test_group_cancel_requests_every_member():
     calls = []
     handles = [make_handle(Status.FINISHED, i, cancel=lambda i=i: calls.append(i)) for i in range(3)]
