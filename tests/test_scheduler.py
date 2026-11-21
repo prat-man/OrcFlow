@@ -1,11 +1,12 @@
 from concurrent.futures import CancelledError, Future
 from multiprocessing import Pipe
 from queue import Queue
+from threading import Event, Thread
 
 import pytest
 from psutil import NoSuchProcess
 
-from orcflow.handle import ResultProxy
+from orcflow.handle import ResultProxy, Run
 from orcflow.node import Node, NodeType
 from orcflow.scheduler import Scheduler
 from orcflow.serialization import serialize_call
@@ -57,6 +58,69 @@ def make_scheduler(concurrency=None):
 
 def dummy():
     return None
+
+
+@pytest.mark.parametrize("submission_path", ["direct", "worker_request"])
+def test_tree_snapshot_waits_for_child_registration(monkeypatch, submission_path):
+    scheduler, runtime = make_scheduler()
+    root = Node("root", NodeType.FLOW)
+    run = Run(scheduler.submit(dummy, node=root), runtime, root)
+    child_added = Event()
+    release = Event()
+    snapshot_started = Event()
+    snapshot_ready = Event()
+    snapshots = []
+    original_add = Node.add
+
+    def pause_after_add(self, *args, **kwargs):
+        node = original_add(self, *args, **kwargs)
+        child_added.set()
+        if not release.wait(5):
+            raise TimeoutError("Child registration was not released")
+        return node
+
+    monkeypatch.setattr(Node, "add", pause_after_add)
+
+    receiver = sender = None
+    if submission_path == "direct":
+        producer = Thread(target=lambda: scheduler.submit(dummy, parent=root.id, name="child"))
+    else:
+        receiver, sender = Pipe(duplex=False)
+        scheduler.requests.put((
+            Request.SUBMIT, serialize_call(dummy, (), {}), "child-id", root.id,
+            "child", None, None, sender,
+        ))
+        scheduler.requests.put((Request.STOP,))
+        producer = Thread(target=scheduler._run)
+
+    def take_snapshot():
+        snapshot_started.set()
+        snapshots.append(run.tree())
+        snapshot_ready.set()
+
+    reader = Thread(target=take_snapshot)
+    producer.start()
+    try:
+        assert child_added.wait(5)
+        reader.start()
+        assert snapshot_started.wait(5)
+        assert not snapshot_ready.wait(0.1), "Snapshot exposed an unregistered child"
+    finally:
+        release.set()
+        producer.join(5)
+        if reader.ident is not None:
+            reader.join(5)
+        for future in reversed(runtime.pool.futures):
+            if not future.done():
+                future.set_result(None)
+        if receiver is not None:
+            receiver.close()
+            sender.close()
+
+    assert snapshot_ready.is_set()
+    assert len(snapshots[0].children) == 1
+    assert snapshots[0].children[0].status is Status.QUEUED
+    snapshots[0].children[0]._format()
 
 
 def queue_work(scheduler, runtime, name, tag=None):

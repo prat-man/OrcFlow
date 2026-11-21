@@ -55,16 +55,18 @@ class Scheduler:
 
     def submit(self, fn, args=(), kwargs=None, *, node=None, parent=None, name=None, tag=None, timeout=None):
         """Accept a flow or task for execution."""
-        parent = self.runtime.nodes[parent] if parent is not None else None
-        if node is None:
-            node = parent.add(name, NodeType.TASK)
-
         # Serialize the callable and arguments before crossing the process boundary.
         payload = serialize_call(fn, args, {} if kwargs is None else kwargs)
 
         # Every submission receives its result through the same reply channel.
         receiver, sender = Pipe(duplex=False)
-        self._queue(payload, node, parent, sender, tag, timeout)
+
+        with self.lock:
+            parent = self.runtime.nodes[parent] if parent is not None else None
+            if node is None:
+                node = parent.add(name, NodeType.TASK)
+            self._queue(payload, node, parent, sender, tag, timeout)
+        
         return Handle(ResultProxy(receiver), lambda: self._cancel(node))
 
     def _queue(self, payload, node, parent, reply, tag=None, timeout=None):
@@ -268,10 +270,10 @@ class Scheduler:
                 _, payload, node_id, parent_id, name, tag, timeout, reply = message
 
                 # The real tree lives in the parent process.
-                parent = self.runtime.nodes[parent_id]
-                node = parent.add(name, NodeType.TASK, node_id)
-
-                self._queue(payload, node, parent, reply, tag, timeout)
+                with self.lock:
+                    parent = self.runtime.nodes[parent_id]
+                    node = parent.add(name, NodeType.TASK, node_id)
+                    self._queue(payload, node, parent, reply, tag, timeout)
 
             elif kind == Request.CANCEL:
                 _, node_id = message
